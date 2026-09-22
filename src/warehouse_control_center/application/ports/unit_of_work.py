@@ -1,0 +1,42 @@
+"""Transaction boundary used by future application services."""
+
+from collections.abc import Callable
+from types import TracebackType
+from typing import Protocol, Self
+
+from warehouse_control_center.application.ports.repositories import (
+    AuditRepository,
+    CourierRepository,
+    ShipmentRepository,
+    UserRepository,
+)
+
+
+class UnitOfWork(Protocol):
+    @property
+    def users(self) -> UserRepository: ...
+
+    @property
+    def couriers(self) -> CourierRepository: ...
+
+    @property
+    def shipments(self) -> ShipmentRepository: ...
+
+    @property
+    def audits(self) -> AuditRepository: ...
+
+    def __enter__(self) -> Self: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None: ...
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+
+UnitOfWorkFactory = Callable[[], UnitOfWork]

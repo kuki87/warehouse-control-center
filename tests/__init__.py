@@ -1,0 +1,1 @@
+"""Warehouse Control Center tests."""

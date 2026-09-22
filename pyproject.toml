@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "warehouse-control-center"
+version = "0.1.0"
+description = "Reliable desktop operations foundation for a parcel warehouse."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "Warehouse Control Center Team" }]
+dependencies = [
+    "argon2-cffi>=25.1,<26",
+    "SQLAlchemy>=2.0.43,<3",
+    "alembic>=1.16.5,<2",
+    "platformdirs>=4.4,<5",
+    "PySide6>=6.8,<7",
+    "tzdata>=2025.2; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.17,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=6.2,<7",
+    "pytest-qt>=4.4,<5",
+    "ruff>=0.12,<1",
+]
+
+[project.scripts]
+warehouse-control-center = "warehouse_control_center.main:main"
+warehouse-control-center-db = "warehouse_control_center.infrastructure.database.migration_runner:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+warehouse_control_center = ["migrations/script.py.mako"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers -ra"
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+files = ["src"]
+warn_unreachable = true

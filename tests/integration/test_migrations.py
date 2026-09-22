@@ -1,0 +1,351 @@
+"""Alembic creates and safely rechecks the complete Phase 1 schema."""
+
+import pytest
+from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Engine
+
+from tests.fixtures.database import upgrade_to_head
+from warehouse_control_center.config.settings import Settings
+from warehouse_control_center.infrastructure.database.base import Base
+from warehouse_control_center.infrastructure.database.migration_runner import alembic_config
+from warehouse_control_center.infrastructure.database.schema import EXPECTED_SCHEMA_REVISION
+
+EXPECTED_TABLES = {
+    "alembic_version",
+    "users",
+    "couriers",
+    "shipments",
+    "shipment_status_history",
+    "audit_events",
+}
+
+VALID_HASH = (
+    "$argon2id$v=19$m=1024,t=1,p=1$uym6DDygRmSpHGPrLLvt/w$"
+    "VdqOimLEoz+M7OQ4qVVsXZLSf8TC1UlslPiZi2f4K1I"
+)
+
+
+def test_upgrade_empty_database_to_head(test_settings: Settings) -> None:
+    assert not test_settings.database_path.exists()
+    test_settings.runtime_paths.create()
+
+    upgrade_to_head(test_settings)
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        assert EXPECTED_TABLES == set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_already_current_database_is_safe(test_settings: Settings) -> None:
+    test_settings.runtime_paths.create()
+    upgrade_to_head(test_settings)
+    upgrade_to_head(test_settings)
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        assert EXPECTED_TABLES == set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_phase1_database_with_referenced_user_to_head(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0001_phase1")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) VALUES "
+                    "('operator', 'operator', "
+                    ":password_hash, 'ADMIN') "
+                    "RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES ('T', 'T', 'B', 'B', 'Name', 'Address', 'City', 'Phone', "
+                    "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT COUNT(*) FROM users")) == 1
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipments")) == 1
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                EXPECTED_SCHEMA_REVISION
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("password_hash", "expected_revision"),
+    [
+        ("", "0001_phase1"),
+        ("plaintext", "0001_phase1"),
+        (
+            "$argon2i$v=19$m=1024,t=1,p=1$c2FsdHNhbHQ$ZmFrZWhhc2hmYWtl",
+            "0001_phase1",
+        ),
+        (
+            "$argon2d$v=19$m=1024,t=1,p=1$c2FsdHNhbHQ$ZmFrZWhhc2hmYWtl",
+            "0001_phase1",
+        ),
+        ("$argon2id$garbage", "0002_authentication"),
+        (
+            "$argon2id$v=19$m=999999999,t=1,p=1$c2FsdHNhbHQ$ZmFrZWhhc2hmYWtl",
+            "0002_authentication",
+        ),
+    ],
+)
+def test_authentication_hardening_rejects_unsupported_stored_credentials(
+    test_settings: Settings,
+    password_hash: str,
+    expected_revision: str,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0001_phase1")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('legacy', 'legacy', :password_hash, 'WAREHOUSE_OPERATOR')"
+                ),
+                {"password_hash": password_hash},
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        with pytest.raises(RuntimeError, match="authentication constraints|stored credential"):
+            command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT password_hash FROM users")) == password_hash
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                expected_revision
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("normalized", "must_change", "active"),
+    [(" legacy ", 0, 1), ("legacy", 2, 1), ("legacy", 0, 7)],
+)
+def test_authentication_hardening_rejects_invalid_legacy_user_state(
+    test_settings: Settings,
+    normalized: str,
+    must_change: int,
+    active: int,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0001_phase1")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role, "
+                    "must_change_password, active) "
+                    "VALUES ('legacy', :normalized, :password_hash, 'ADMIN', "
+                    ":must_change, :active)"
+                ),
+                {
+                    "normalized": normalized,
+                    "password_hash": VALID_HASH,
+                    "must_change": must_change,
+                    "active": active,
+                },
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        with pytest.raises(RuntimeError, match="state invariants"):
+            command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                "0002_authentication"
+            )
+            assert connection.scalar(text("SELECT username_normalized FROM users")) == normalized
+    finally:
+        engine.dispose()
+
+
+def test_phase1_users_of_all_roles_and_archive_states_upgrade_without_loss(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0001_phase1")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            for index, (role, active, archived_at) in enumerate(
+                [
+                    ("ADMIN", 1, None),
+                    ("WAREHOUSE_OPERATOR", 0, None),
+                    ("SUPERVISOR", 0, "2026-01-01 00:00:00"),
+                ],
+                start=1,
+            ):
+                connection.execute(
+                    text(
+                        "INSERT INTO users "
+                        "(username, username_normalized, password_hash, role, active, archived_at) "
+                        "VALUES (:username, :username, :password_hash, :role, :active, "
+                        ":archived_at)"
+                    ),
+                    {
+                        "username": f"user-{index}",
+                        "password_hash": VALID_HASH,
+                        "role": role,
+                        "active": active,
+                        "archived_at": archived_at,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT role, active, archived_at FROM users ORDER BY id")
+            ).all() == [
+                ("ADMIN", 1, None),
+                ("WAREHOUSE_OPERATOR", 0, None),
+                ("SUPERVISOR", 0, "2026-01-01 00:00:00"),
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_hardening_downgrade_and_reupgrade_preserve_user_data(
+    test_settings: Settings,
+) -> None:
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('admin', 'admin', :password_hash, 'ADMIN')"
+                ),
+                {"password_hash": VALID_HASH},
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.downgrade(config, "0002_authentication")
+        command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT username, password_hash, role FROM users")
+            ).one() == ("admin", VALID_HASH, "ADMIN")
+    finally:
+        engine.dispose()
+
+
+def test_required_indexes_exist(engine: object) -> None:
+    database_inspector = inspect(engine)
+    shipment_indexes = {index["name"] for index in database_inspector.get_indexes("shipments")}
+    assert {
+        "ix_shipments_status",
+        "ix_shipments_courier_id_status",
+        "ix_shipments_received_at",
+        "ix_shipments_status_received_at",
+        "ix_shipments_recipient_city",
+    } <= shipment_indexes
+    history_indexes = {
+        index["name"] for index in database_inspector.get_indexes("shipment_status_history")
+    }
+    assert "ix_shipment_status_history_shipment_timestamp" in history_indexes
+    audit_indexes = {index["name"] for index in database_inspector.get_indexes("audit_events")}
+    assert {
+        "ix_audit_events_timestamp",
+        "ix_audit_events_entity_type_entity_id",
+    } <= audit_indexes
+
+
+def test_orm_metadata_has_no_migration_drift(engine: Engine) -> None:
+    with engine.connect() as connection:
+        context = MigrationContext.configure(
+            connection,
+            opts={"compare_type": True, "compare_server_default": True},
+        )
+        assert compare_metadata(context, Base.metadata) == []
+
+
+def test_runtime_expected_revision_matches_alembic_head(test_settings: Settings) -> None:
+    with alembic_config(test_settings) as config:
+        script = ScriptDirectory.from_config(config)
+
+        assert script.get_heads() == [EXPECTED_SCHEMA_REVISION]
+
+
+def test_exact_identifier_lookups_use_unique_indexes(engine: Engine) -> None:
+    queries = {
+        "users": "username_normalized",
+        "couriers": "courier_code_normalized",
+        "shipments-tracking": "tracking_number_normalized",
+        "shipments-barcode": "barcode_normalized",
+    }
+    tables = {
+        "users": "users",
+        "couriers": "couriers",
+        "shipments-tracking": "shipments",
+        "shipments-barcode": "shipments",
+    }
+
+    with engine.connect() as connection:
+        for label, column in queries.items():
+            rows = connection.exec_driver_sql(
+                f"EXPLAIN QUERY PLAN SELECT id FROM {tables[label]} WHERE {column} = ?",
+                ("probe",),
+            ).all()
+            plan = " ".join(str(value) for row in rows for value in row).upper()
+            assert "USING" in plan and "INDEX" in plan, (label, plan)
