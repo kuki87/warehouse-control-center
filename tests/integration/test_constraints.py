@@ -9,7 +9,11 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from tests.fixtures.database import make_courier, make_shipment, make_user
 from warehouse_control_center.domain.entities import AuditEvent
-from warehouse_control_center.domain.exceptions import DuplicateUserError
+from warehouse_control_center.domain.exceptions import (
+    DuplicateBarcodeError,
+    DuplicateTrackingNumberError,
+    DuplicateUserError,
+)
 from warehouse_control_center.infrastructure.database.engine import SessionFactory
 from warehouse_control_center.infrastructure.database.models import (
     AuditEventModel,
@@ -78,7 +82,10 @@ def test_equivalent_shipment_identifiers_collide(
         tracking_number="AB123" if duplicate_field == "tracking" else "TRK-OTHER",
         barcode="BAR123" if duplicate_field == "barcode" else "BAR-OTHER",
     )
-    with pytest.raises(IntegrityError):
+    expected = (
+        DuplicateTrackingNumberError if duplicate_field == "tracking" else DuplicateBarcodeError
+    )
+    with pytest.raises(expected):
         with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
             unit_of_work.shipments.add(second)
             unit_of_work.commit()
@@ -446,7 +453,14 @@ def test_archived_identifiers_remain_reserved(session_factory: SessionFactory) -
     )
     for factory in duplicate_factories:
         repository_name, entity = factory()
-        with pytest.raises((IntegrityError, DuplicateUserError)):
+        with pytest.raises(
+            (
+                IntegrityError,
+                DuplicateUserError,
+                DuplicateTrackingNumberError,
+                DuplicateBarcodeError,
+            )
+        ):
             with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
                 getattr(unit_of_work, f"{repository_name}s").add(entity)
 

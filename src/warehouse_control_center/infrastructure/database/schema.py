@@ -4,13 +4,14 @@ from sqlalchemy import Engine, inspect, text
 
 from warehouse_control_center.domain.exceptions import DatabaseSchemaError
 
-EXPECTED_SCHEMA_REVISION = "0003_auth_hardening"
+EXPECTED_SCHEMA_REVISION = "0004_shipments_domain"
 REQUIRED_SCHEMA_TABLES = frozenset(
     {
         "alembic_version",
         "audit_events",
         "couriers",
         "shipment_status_history",
+        "shipment_problems",
         "shipments",
         "users",
     }

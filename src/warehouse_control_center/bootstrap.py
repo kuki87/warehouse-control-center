@@ -12,6 +12,7 @@ from warehouse_control_center.application.ports.unit_of_work import UnitOfWork
 from warehouse_control_center.application.services import (
     AuthenticationService,
     FirstRunAdministratorService,
+    ShipmentService,
     UserService,
 )
 from warehouse_control_center.config.settings import Settings
@@ -39,6 +40,7 @@ class ApplicationResources:
     engine: Engine
     authentication: AuthenticationService
     users: UserService
+    shipments: ShipmentService
     initial_administrator: TemporaryCredential | None
 
     def shutdown(self) -> None:
@@ -86,15 +88,17 @@ def bootstrap(settings: Settings | None = None) -> ApplicationResources:
             password_generator,
             clock,
         )
+        shipments = ShipmentService(uow_factory, clock)
         if initial_administrator is not None:
             logger.info("First-run administrator initialized; temporary credential not logged")
         return ApplicationResources(
-            active_settings,
-            logger,
-            engine,
-            authentication,
-            users,
-            initial_administrator,
+            settings=active_settings,
+            logger=logger,
+            engine=engine,
+            authentication=authentication,
+            users=users,
+            shipments=shipments,
+            initial_administrator=initial_administrator,
         )
     except Exception:
         logger.exception("Application startup failed")

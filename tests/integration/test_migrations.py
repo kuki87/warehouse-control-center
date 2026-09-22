@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "users",
     "couriers",
     "shipments",
+    "shipment_problems",
     "shipment_status_history",
     "audit_events",
 }
@@ -98,6 +99,105 @@ def test_upgrade_phase1_database_with_referenced_user_to_head(
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
                 EXPECTED_SCHEMA_REVISION
             )
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_populated_authentication_head_to_shipment_domain(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0003_auth_hardening")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, "
+                    "'WAREHOUSE_OPERATOR') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            shipment_id = connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES ('TRK-1', 'TRK-1', 'BAR-1', 'BAR-1', 'Željko', "
+                    "'Ćirila i Metodija 10', 'Banja Luka', '+387 65 123 456', "
+                    "'Đorđe', 'SORTING', CURRENT_TIMESTAMP, :user_id, 1) RETURNING id"
+                ),
+                {"user_id": user_id},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipment_status_history "
+                    "(shipment_id, old_status, new_status, changed_by, reason) "
+                    "VALUES (:shipment_id, 'RECEIVED', 'SORTING', :user_id, 'sorted')"
+                ),
+                {"shipment_id": shipment_id, "user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipments")) == 1
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipment_status_history")) == 1
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipment_problems")) == 0
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                EXPECTED_SCHEMA_REVISION
+            )
+    finally:
+        engine.dispose()
+
+
+def test_shipment_domain_migration_rejects_invalid_populated_rows(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0003_auth_hardening")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES ('', '', 'BAR', 'BAR', 'Name', 'Address', 'City', "
+                    "'Phone', 'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="shipment-domain constraints"):
+        upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                "0003_auth_hardening"
+            )
+            assert connection.scalar(text("SELECT tracking_number FROM shipments")) == ""
     finally:
         engine.dispose()
 
@@ -299,11 +399,19 @@ def test_required_indexes_exist(engine: object) -> None:
         "ix_shipments_received_at",
         "ix_shipments_status_received_at",
         "ix_shipments_recipient_city",
+        "ix_shipments_updated_at",
     } <= shipment_indexes
     history_indexes = {
         index["name"] for index in database_inspector.get_indexes("shipment_status_history")
     }
     assert "ix_shipment_status_history_shipment_timestamp" in history_indexes
+    problem_indexes = {
+        index["name"] for index in database_inspector.get_indexes("shipment_problems")
+    }
+    assert {
+        "ix_shipment_problems_shipment_reported",
+        "uq_shipment_problems_one_open",
+    } <= problem_indexes
     audit_indexes = {index["name"] for index in database_inspector.get_indexes("audit_events")}
     assert {
         "ix_audit_events_timestamp",

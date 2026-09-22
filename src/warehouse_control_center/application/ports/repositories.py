@@ -1,8 +1,44 @@
-"""Minimal persistence ports required by the Phase 1 foundation."""
+"""Purpose-specific persistence ports used by application services."""
 
-from typing import Protocol
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal, Protocol
 
-from warehouse_control_center.domain.entities import AuditEvent, Courier, Shipment, User
+from warehouse_control_center.domain.entities import (
+    AuditEvent,
+    Courier,
+    Shipment,
+    ShipmentProblem,
+    ShipmentStatusHistory,
+    User,
+)
+from warehouse_control_center.domain.enums import ShipmentStatus
+
+ShipmentSortField = Literal[
+    "tracking_number",
+    "recipient_name",
+    "recipient_city",
+    "status",
+    "received_at",
+    "updated_at",
+]
+SortDirection = Literal["asc", "desc"]
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentListQuery:
+    offset: int
+    limit: int
+    search: str | None = None
+    status: ShipmentStatus | None = None
+    courier_id: int | None = None
+    city: str | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    include_archived: bool = False
+    problem_only: bool = False
+    sort_by: ShipmentSortField = "received_at"
+    sort_direction: SortDirection = "desc"
 
 
 class UserRepository(Protocol):
@@ -44,6 +80,20 @@ class ShipmentRepository(Protocol):
     def get_by_normalized_tracking_number(self, tracking_number: str) -> Shipment | None: ...
 
     def get_by_normalized_barcode(self, barcode: str) -> Shipment | None: ...
+
+    def save(self, shipment: Shipment) -> Shipment: ...
+
+    def list_page(self, query: ShipmentListQuery) -> tuple[list[Shipment], int]: ...
+
+    def add_history(self, history: ShipmentStatusHistory) -> ShipmentStatusHistory: ...
+
+    def list_history(self, shipment_id: int) -> list[ShipmentStatusHistory]: ...
+
+    def add_problem(self, problem: ShipmentProblem) -> ShipmentProblem: ...
+
+    def save_problem(self, problem: ShipmentProblem) -> ShipmentProblem: ...
+
+    def get_open_problem(self, shipment_id: int) -> ShipmentProblem | None: ...
 
 
 class AuditRepository(Protocol):

@@ -1,10 +1,19 @@
 """Explicit mappings keep SQLAlchemy models outside the application boundary."""
 
-from warehouse_control_center.domain.entities import AuditEvent, Courier, Shipment, User
+from warehouse_control_center.domain.entities import (
+    AuditEvent,
+    Courier,
+    Shipment,
+    ShipmentProblem,
+    ShipmentStatusHistory,
+    User,
+)
 from warehouse_control_center.infrastructure.database.models import (
     AuditEventModel,
     CourierModel,
     ShipmentModel,
+    ShipmentProblemModel,
+    ShipmentStatusHistoryModel,
     UserModel,
 )
 
@@ -75,6 +84,7 @@ def courier_to_entity(model: CourierModel) -> Courier:
 
 def shipment_to_model(shipment: Shipment) -> ShipmentModel:
     return ShipmentModel(
+        id=shipment.id,
         tracking_number=shipment.tracking_number,
         tracking_number_normalized=shipment.tracking_number_normalized,
         barcode=shipment.barcode,
@@ -96,6 +106,60 @@ def shipment_to_model(shipment: Shipment) -> ShipmentModel:
         notes=shipment.notes,
         archived_at=shipment.archived_at,
         version=shipment.version,
+    )
+
+
+def history_to_model(history: ShipmentStatusHistory) -> ShipmentStatusHistoryModel:
+    return ShipmentStatusHistoryModel(
+        id=history.id,
+        shipment_id=history.shipment_id,
+        old_status=history.old_status,
+        new_status=history.new_status,
+        changed_by=history.changed_by,
+        timestamp=history.timestamp,
+        reason=history.reason,
+        is_admin_override=history.is_admin_override,
+    )
+
+
+def history_to_entity(model: ShipmentStatusHistoryModel) -> ShipmentStatusHistory:
+    return ShipmentStatusHistory(
+        id=model.id,
+        shipment_id=model.shipment_id,
+        old_status=model.old_status,
+        new_status=model.new_status,
+        changed_by=model.changed_by,
+        timestamp=model.timestamp,
+        reason=model.reason,
+        is_admin_override=model.is_admin_override,
+    )
+
+
+def problem_to_model(problem: ShipmentProblem) -> ShipmentProblemModel:
+    return ShipmentProblemModel(
+        id=problem.id,
+        shipment_id=problem.shipment_id,
+        problem_type=problem.problem_type,
+        description=problem.description,
+        previous_status=problem.previous_status,
+        reported_by=problem.reported_by,
+        reported_at=problem.reported_at,
+        resolved_by=problem.resolved_by,
+        resolved_at=problem.resolved_at,
+    )
+
+
+def problem_to_entity(model: ShipmentProblemModel) -> ShipmentProblem:
+    return ShipmentProblem(
+        id=model.id,
+        shipment_id=model.shipment_id,
+        problem_type=model.problem_type,
+        description=model.description,
+        previous_status=model.previous_status,
+        reported_by=model.reported_by,
+        reported_at=model.reported_at,
+        resolved_by=model.resolved_by,
+        resolved_at=model.resolved_at,
     )
 
 

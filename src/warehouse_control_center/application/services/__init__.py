@@ -6,6 +6,12 @@ from warehouse_control_center.application.services.authentication import (
 from warehouse_control_center.application.services.first_run import (
     FirstRunAdministratorService,
 )
+from warehouse_control_center.application.services.shipments import ShipmentService
 from warehouse_control_center.application.services.users import UserService
 
-__all__ = ["AuthenticationService", "FirstRunAdministratorService", "UserService"]
+__all__ = [
+    "AuthenticationService",
+    "FirstRunAdministratorService",
+    "ShipmentService",
+    "UserService",
+]

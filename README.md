@@ -1,11 +1,12 @@
 # Warehouse Control Center
 
 Warehouse Control Center is a desktop operations system for receiving, sorting, assigning,
-and dispatching parcel shipments. The repository currently contains the first production
-PySide6 desktop UI over the audited Phase 2 backend: login, one-time first-run administrator
+and dispatching parcel shipments. The repository contains the first production PySide6
+desktop UI plus the Phase 3A shipment-domain backend. Login, one-time first-run administrator
 handling, mandatory password change, permission-based navigation, user administration, and
-logout. Shipment, courier, reporting, audit-log, and settings workflows remain explicit
-placeholders for later phases.
+logout are available in the UI. Shipment operations are implemented behind application
+services but remain an explicit UI placeholder until the shipment UI phase. Courier,
+reporting, audit-log, and settings workflows remain placeholders for later phases.
 
 ## Architecture
 
@@ -21,6 +22,26 @@ PySide6 UI -> application services/ports -> domain
 The SQLAlchemy models stay in the infrastructure layer. Application-facing repositories
 exchange domain entities. Repositories may flush but never commit; the Unit of Work owns
 the transaction boundary.
+
+## Shipment-domain behavior
+
+Shipment tracking numbers and barcodes are normalized with Unicode NFKC, whitespace
+removal, and case folding to uppercase for indexed equality. Punctuation is preserved:
+`ABC-123` and `ABC123` are intentionally different identifiers. Creation starts
+a shipment in `RECEIVED`; status history begins with the first real transition rather than a
+synthetic `NULL -> RECEIVED` record.
+
+Normal status changes follow the centralized workflow policy. Invalid transitions require
+the override permission and a recorded reason. Reporting a problem is the only normal path
+into `PROBLEM`, and a shipment may have only one unresolved problem. A second unresolved
+problem is rejected. Resolving a problem returns to its previous status by default, or to an
+explicit recovery status accepted by the workflow policy. Shipment mutations, history,
+problem records, and audit events share one Unit-of-Work transaction.
+
+Shipment queries use bounded database pagination, allow-listed sorting, and indexed exact
+tracking/barcode lookups. Archived shipments are excluded unless explicitly requested. The
+SQLite deployment remains a single-workstation design; optimistic version checks prevent a
+stale editor from silently overwriting a newer shipment update.
 
 ## Requirements
 
@@ -170,7 +191,7 @@ alembic check
 ```text
 src/warehouse_control_center/
   application/ports/       repository, security, clock, and Unit-of-Work interfaces
-  application/services/    authentication and user-management use cases
+  application/services/    authentication, user-management, and shipment use cases
   config/                  typed settings and platform runtime paths
   domain/                  entities, enums, normalization, exceptions
   infrastructure/database/ SQLAlchemy models, adapters, Unit of Work

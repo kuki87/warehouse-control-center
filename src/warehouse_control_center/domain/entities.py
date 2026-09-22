@@ -1,17 +1,18 @@
-"""Persistence-independent Phase 1 entities."""
+"""Persistence-independent business entities."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from warehouse_control_center.domain.enums import ShipmentStatus, UserRole
+from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
 from warehouse_control_center.domain.normalization import (
     normalize_barcode,
     normalize_courier_code,
     normalize_tracking_number,
     normalize_username,
 )
+from warehouse_control_center.domain.shipment_validation import validate_shipment_fields
 from warehouse_control_center.domain.validation import (
     validate_password_hash,
     validate_user_role,
@@ -91,6 +92,28 @@ class Shipment:
     id: int | None = None
 
     def __post_init__(self) -> None:
+        validated = validate_shipment_fields(
+            tracking_number=self.tracking_number,
+            barcode=self.barcode,
+            recipient_name=self.recipient_name,
+            recipient_address=self.recipient_address,
+            recipient_city=self.recipient_city,
+            recipient_phone=self.recipient_phone,
+            sender_name=self.sender_name,
+            notes=self.notes,
+        )
+        self.tracking_number = validated.tracking_number
+        self.barcode = validated.barcode
+        self.recipient_name = validated.recipient_name
+        self.recipient_address = validated.recipient_address
+        self.recipient_city = validated.recipient_city
+        self.recipient_phone = validated.recipient_phone
+        self.sender_name = validated.sender_name
+        self.notes = validated.notes
+        if not isinstance(self.status, ShipmentStatus):
+            raise ValueError("Unsupported shipment status")
+        if self.version < 1:
+            raise ValueError("Shipment version must be positive")
         self.tracking_number_normalized = normalize_tracking_number(self.tracking_number)
         self.barcode_normalized = normalize_barcode(self.barcode)
 
@@ -104,6 +127,19 @@ class ShipmentStatusHistory:
     timestamp: datetime = field(default_factory=utc_now)
     reason: str | None = None
     is_admin_override: bool = False
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class ShipmentProblem:
+    shipment_id: int
+    problem_type: ProblemType
+    previous_status: ShipmentStatus
+    reported_by: int
+    reported_at: datetime = field(default_factory=utc_now)
+    description: str | None = None
+    resolved_by: int | None = None
+    resolved_at: datetime | None = None
     id: int | None = None
 
 
