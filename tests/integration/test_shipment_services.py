@@ -130,6 +130,34 @@ def test_missing_inactive_and_forged_actor_sessions_are_rejected(
         harness.service.archive_shipment(forged, shipment.id, expected_version=shipment.version)
 
 
+def test_stale_credential_and_archived_actor_sessions_are_rejected(
+    harness: ShipmentHarness,
+    session_factory: SessionFactory,
+) -> None:
+    shipment = harness.create()
+    stale = replace(
+        harness.admin,
+        credential_version=harness.admin.credential_version + 1,
+    )
+    with pytest.raises(PermissionDeniedError, match="no longer authorized"):
+        harness.service.archive_shipment(
+            stale,
+            shipment.id,
+            expected_version=shipment.version,
+        )
+
+    with session_factory.begin() as database:
+        actor = database.get(UserModel, harness.admin.user_id)
+        assert actor is not None
+        actor.archived_at = harness.clock.now()
+    with pytest.raises(PermissionDeniedError, match="no longer authorized"):
+        harness.service.archive_shipment(
+            harness.admin,
+            shipment.id,
+            expected_version=shipment.version,
+        )
+
+
 def test_update_validates_metadata_permissions_archive_and_version(
     harness: ShipmentHarness,
 ) -> None:
@@ -782,3 +810,27 @@ def test_archive_audit_failure_rolls_back_archive(
     unchanged = harness.service.get_shipment(harness.admin, shipment.id)
     assert unchanged.archived_at is None
     assert unchanged.version == shipment.version
+
+
+def test_get_open_problem_returns_dto_and_clears_after_resolution(
+    harness: ShipmentHarness,
+) -> None:
+    shipment = harness.create()
+    assert harness.service.get_open_problem(harness.admin, shipment.id) is None
+    reported = harness.service.report_problem(
+        harness.operator,
+        shipment.id,
+        ProblemType.DAMAGED,
+        expected_version=shipment.version,
+        description="Damaged corner",
+    )
+
+    open_problem = harness.service.get_open_problem(harness.admin, shipment.id)
+    assert open_problem == reported
+    in_problem = harness.service.get_shipment(harness.admin, shipment.id)
+    harness.service.resolve_problem(
+        harness.supervisor,
+        shipment.id,
+        expected_version=in_problem.version,
+    )
+    assert harness.service.get_open_problem(harness.admin, shipment.id) is None

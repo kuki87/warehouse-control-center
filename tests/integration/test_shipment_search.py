@@ -33,6 +33,14 @@ def test_exact_lookup_and_partial_search_fields(harness: ShipmentHarness) -> Non
         result = harness.service.list_shipments(harness.operator, search=term)
         assert [item.id for item in result.items] == [shipment.id]
 
+    injection_probe = harness.service.list_shipments(
+        harness.operator,
+        search="' OR 1=1 --",
+    )
+    assert injection_probe.total == 0
+    assert injection_probe.items == ()
+    assert harness.service.list_shipments(harness.operator).total == 1
+
 
 def test_filters_sorting_pagination_and_archived_inclusion(
     harness: ShipmentHarness,

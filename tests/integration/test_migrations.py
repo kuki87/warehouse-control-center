@@ -81,7 +81,7 @@ def test_upgrade_phase1_database_with_referenced_user_to_head(
                     "(tracking_number, tracking_number_normalized, barcode, "
                     "barcode_normalized, recipient_name, recipient_address, recipient_city, "
                     "recipient_phone, sender_name, status, received_at, created_by, version) "
-                    "VALUES ('T', 'T', 'B', 'B', 'Name', 'Address', 'City', 'Phone', "
+                    "VALUES ('T', 'T', 'B', 'B', 'Name', 'Address', 'City', '123', "
                     "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
                 ),
                 {"user_id": user_id},
@@ -158,8 +158,72 @@ def test_upgrade_populated_authentication_head_to_shipment_domain(
         engine.dispose()
 
 
+def test_shipment_domain_migration_rejects_corrupt_legacy_history(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0003_auth_hardening")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            shipment_id = connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES ('TRK', 'TRK', 'BAR', 'BAR', 'Name', 'Address', 'City', "
+                    "'123', 'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1) RETURNING id"
+                ),
+                {"user_id": user_id},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipment_status_history "
+                    "(shipment_id, old_status, new_status, changed_by) "
+                    "VALUES (:shipment_id, 'RECEIVED', 'RECEIVED', :user_id)"
+                ),
+                {"shipment_id": shipment_id, "user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="shipment-domain constraints"):
+        upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                "0003_auth_hardening"
+            )
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipment_status_history")) == 1
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("tracking_number", "tracking_number_normalized", "recipient_phone"),
+    [
+        ("", "", "123"),
+        ("   ", "   ", "123"),
+        ("ABC-123", "WRONG", "123"),
+        ("TRK", "TRK", "CALL-ME"),
+    ],
+)
 def test_shipment_domain_migration_rejects_invalid_populated_rows(
     test_settings: Settings,
+    tracking_number: str,
+    tracking_number_normalized: str,
+    recipient_phone: str,
 ) -> None:
     test_settings.runtime_paths.create()
     with alembic_config(test_settings) as config:
@@ -181,10 +245,16 @@ def test_shipment_domain_migration_rejects_invalid_populated_rows(
                     "(tracking_number, tracking_number_normalized, barcode, "
                     "barcode_normalized, recipient_name, recipient_address, recipient_city, "
                     "recipient_phone, sender_name, status, received_at, created_by, version) "
-                    "VALUES ('', '', 'BAR', 'BAR', 'Name', 'Address', 'City', "
-                    "'Phone', 'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
+                    "VALUES (:tracking_number, :tracking_number_normalized, 'BAR', 'BAR', "
+                    "'Name', 'Address', 'City', :recipient_phone, 'Sender', 'RECEIVED', "
+                    "CURRENT_TIMESTAMP, :user_id, 1)"
                 ),
-                {"user_id": user_id},
+                {
+                    "user_id": user_id,
+                    "tracking_number": tracking_number,
+                    "tracking_number_normalized": tracking_number_normalized,
+                    "recipient_phone": recipient_phone,
+                },
             )
     finally:
         engine.dispose()
@@ -197,7 +267,9 @@ def test_shipment_domain_migration_rejects_invalid_populated_rows(
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
                 "0003_auth_hardening"
             )
-            assert connection.scalar(text("SELECT tracking_number FROM shipments")) == ""
+            assert connection.scalar(text("SELECT tracking_number FROM shipments")) == (
+                tracking_number
+            )
     finally:
         engine.dispose()
 

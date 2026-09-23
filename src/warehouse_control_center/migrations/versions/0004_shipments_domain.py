@@ -5,32 +5,41 @@ Revises: 0003_auth_hardening
 Create Date: 2026-09-22
 """
 
+import unicodedata
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.engine import RowMapping
 
 revision: str = "0004_shipments_domain"
 down_revision: str | None = "0003_auth_hardening"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+_PHONE_PUNCTUATION = frozenset("+()-./ ")
+_REQUIRED_TEXT_FIELDS = (
+    ("tracking_number", 255),
+    ("tracking_number_normalized", 255),
+    ("barcode", 255),
+    ("barcode_normalized", 255),
+    ("recipient_name", 255),
+    ("recipient_address", 500),
+    ("recipient_city", 255),
+    ("sender_name", 255),
+)
+
 
 def upgrade() -> None:
     connection = op.get_bind()
-    invalid_shipments = connection.exec_driver_sql(
-        "SELECT COUNT(*) FROM shipments WHERE "
-        "length(tracking_number) NOT BETWEEN 1 AND 255 OR "
-        "length(tracking_number_normalized) NOT BETWEEN 1 AND 255 OR "
-        "length(barcode) NOT BETWEEN 1 AND 255 OR "
-        "length(barcode_normalized) NOT BETWEEN 1 AND 255 OR "
-        "length(recipient_name) NOT BETWEEN 1 AND 255 OR "
-        "length(recipient_address) NOT BETWEEN 1 AND 500 OR "
-        "length(recipient_city) NOT BETWEEN 1 AND 255 OR "
-        "length(recipient_phone) NOT BETWEEN 3 AND 100 OR "
-        "length(sender_name) NOT BETWEEN 1 AND 255 OR "
-        "(notes IS NOT NULL AND length(notes) > 4000)"
-    ).scalar_one()
+    invalid_shipments = sum(
+        not _valid_legacy_shipment(row)
+        for row in connection.exec_driver_sql(
+            "SELECT tracking_number, tracking_number_normalized, barcode, "
+            "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+            "recipient_phone, sender_name, notes FROM shipments"
+        ).mappings()
+    )
     invalid_history = connection.exec_driver_sql(
         "SELECT COUNT(*) FROM shipment_status_history WHERE "
         "old_status = new_status OR is_admin_override NOT IN (0, 1) OR "
@@ -45,31 +54,40 @@ def upgrade() -> None:
 
     with op.batch_alter_table("shipments", recreate="always") as batch_op:
         batch_op.create_check_constraint(
-            "tracking_number_length", "length(tracking_number) BETWEEN 1 AND 255"
+            "tracking_number_length",
+            "length(trim(tracking_number)) >= 1 AND length(tracking_number) <= 255",
         )
         batch_op.create_check_constraint(
             "tracking_number_normalized_length",
-            "length(tracking_number_normalized) BETWEEN 1 AND 255",
+            "length(trim(tracking_number_normalized)) >= 1 "
+            "AND length(tracking_number_normalized) <= 255",
         )
-        batch_op.create_check_constraint("barcode_length", "length(barcode) BETWEEN 1 AND 255")
+        batch_op.create_check_constraint(
+            "barcode_length", "length(trim(barcode)) >= 1 AND length(barcode) <= 255"
+        )
         batch_op.create_check_constraint(
             "barcode_normalized_length",
-            "length(barcode_normalized) BETWEEN 1 AND 255",
+            "length(trim(barcode_normalized)) >= 1 AND length(barcode_normalized) <= 255",
         )
         batch_op.create_check_constraint(
-            "recipient_name_length", "length(recipient_name) BETWEEN 1 AND 255"
+            "recipient_name_length",
+            "length(trim(recipient_name)) >= 1 AND length(recipient_name) <= 255",
         )
         batch_op.create_check_constraint(
-            "recipient_address_length", "length(recipient_address) BETWEEN 1 AND 500"
+            "recipient_address_length",
+            "length(trim(recipient_address)) >= 1 AND length(recipient_address) <= 500",
         )
         batch_op.create_check_constraint(
-            "recipient_city_length", "length(recipient_city) BETWEEN 1 AND 255"
+            "recipient_city_length",
+            "length(trim(recipient_city)) >= 1 AND length(recipient_city) <= 255",
         )
         batch_op.create_check_constraint(
-            "recipient_phone_length", "length(recipient_phone) BETWEEN 3 AND 100"
+            "recipient_phone_length",
+            "length(trim(recipient_phone)) >= 3 AND length(recipient_phone) <= 100",
         )
         batch_op.create_check_constraint(
-            "sender_name_length", "length(sender_name) BETWEEN 1 AND 255"
+            "sender_name_length",
+            "length(trim(sender_name)) >= 1 AND length(sender_name) <= 255",
         )
         batch_op.create_check_constraint("notes_length", "notes IS NULL OR length(notes) <= 4000")
     op.create_index("ix_shipments_updated_at", "shipments", ["updated_at"], unique=False)
@@ -190,3 +208,76 @@ def downgrade() -> None:
             "tracking_number_length",
         ):
             batch_op.drop_constraint(op.f(f"ck_shipments_{name}"), type_="check")
+
+
+def _valid_legacy_shipment(row: RowMapping) -> bool:
+    for field, maximum in _REQUIRED_TEXT_FIELDS:
+        if not _valid_required_text(row[field], maximum):
+            return False
+    phone_value = row["recipient_phone"]
+    phone = _canonical_text(phone_value)
+    if (
+        phone is None
+        or not isinstance(phone_value, str)
+        or not 3 <= len(phone) <= 100
+        or len(phone_value) > 100
+        or any(
+            unicodedata.category(character) != "Nd" and character not in _PHONE_PUNCTUATION
+            for character in phone
+        )
+    ):
+        return False
+    notes = row["notes"]
+    if notes is not None and not _valid_optional_text(notes, 4_000, allow_line_breaks=True):
+        return False
+    tracking = row["tracking_number"]
+    barcode = row["barcode"]
+    tracking_normalized = row["tracking_number_normalized"]
+    barcode_normalized = row["barcode_normalized"]
+    return (
+        isinstance(tracking_normalized, str)
+        and isinstance(barcode_normalized, str)
+        and tracking_normalized == _normalize_identifier(tracking)
+        and barcode_normalized == _normalize_identifier(barcode)
+    )
+
+
+def _valid_required_text(value: object, maximum: int) -> bool:
+    canonical = _canonical_text(value)
+    return (
+        canonical is not None
+        and isinstance(value, str)
+        and len(value) <= maximum
+        and len(canonical) <= maximum
+        and not _contains_disallowed_control(canonical, allow_line_breaks=False)
+    )
+
+
+def _valid_optional_text(value: object, maximum: int, *, allow_line_breaks: bool) -> bool:
+    if not isinstance(value, str) or len(value) > maximum:
+        return False
+    canonical = unicodedata.normalize("NFKC", value).strip()
+    return len(canonical) <= maximum and not _contains_disallowed_control(
+        canonical, allow_line_breaks=allow_line_breaks
+    )
+
+
+def _canonical_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    canonical = unicodedata.normalize("NFKC", value).strip()
+    return canonical or None
+
+
+def _contains_disallowed_control(value: str, *, allow_line_breaks: bool) -> bool:
+    allowed = {"\n", "\r", "\t"} if allow_line_breaks else set()
+    return any(
+        unicodedata.category(character).startswith("C") and character not in allowed
+        for character in value
+    )
+
+
+def _normalize_identifier(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return "".join(unicodedata.normalize("NFKC", value).strip().split()).upper()

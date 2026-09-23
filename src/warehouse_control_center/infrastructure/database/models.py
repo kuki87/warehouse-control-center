@@ -140,40 +140,46 @@ class ShipmentModel(TimestampMixin, Base):
         CheckConstraint(_allowed_values("status", ShipmentStatus), name="status_valid"),
         CheckConstraint("version >= 1", name="version_positive"),
         CheckConstraint(
-            f"length(tracking_number) BETWEEN 1 AND {TRACKING_NUMBER_MAX_LENGTH}",
+            f"length(trim(tracking_number)) >= 1 AND "
+            f"length(tracking_number) <= {TRACKING_NUMBER_MAX_LENGTH}",
             name="tracking_number_length",
         ),
         CheckConstraint(
-            f"length(tracking_number_normalized) BETWEEN 1 AND {TRACKING_NUMBER_MAX_LENGTH}",
+            "length(trim(tracking_number_normalized)) >= 1 AND "
+            f"length(tracking_number_normalized) <= {TRACKING_NUMBER_MAX_LENGTH}",
             name="tracking_number_normalized_length",
         ),
         CheckConstraint(
-            f"length(barcode) BETWEEN 1 AND {BARCODE_MAX_LENGTH}",
+            f"length(trim(barcode)) >= 1 AND length(barcode) <= {BARCODE_MAX_LENGTH}",
             name="barcode_length",
         ),
         CheckConstraint(
-            f"length(barcode_normalized) BETWEEN 1 AND {BARCODE_MAX_LENGTH}",
+            "length(trim(barcode_normalized)) >= 1 AND "
+            f"length(barcode_normalized) <= {BARCODE_MAX_LENGTH}",
             name="barcode_normalized_length",
         ),
         CheckConstraint(
-            f"length(recipient_name) BETWEEN 1 AND {RECIPIENT_NAME_MAX_LENGTH}",
+            f"length(trim(recipient_name)) >= 1 AND "
+            f"length(recipient_name) <= {RECIPIENT_NAME_MAX_LENGTH}",
             name="recipient_name_length",
         ),
         CheckConstraint(
-            f"length(recipient_address) BETWEEN 1 AND {RECIPIENT_ADDRESS_MAX_LENGTH}",
+            f"length(trim(recipient_address)) >= 1 AND "
+            f"length(recipient_address) <= {RECIPIENT_ADDRESS_MAX_LENGTH}",
             name="recipient_address_length",
         ),
         CheckConstraint(
-            f"length(recipient_city) BETWEEN 1 AND {RECIPIENT_CITY_MAX_LENGTH}",
+            f"length(trim(recipient_city)) >= 1 AND "
+            f"length(recipient_city) <= {RECIPIENT_CITY_MAX_LENGTH}",
             name="recipient_city_length",
         ),
         CheckConstraint(
-            f"length(recipient_phone) BETWEEN {RECIPIENT_PHONE_MIN_LENGTH} "
-            f"AND {RECIPIENT_PHONE_MAX_LENGTH}",
+            f"length(trim(recipient_phone)) >= {RECIPIENT_PHONE_MIN_LENGTH} AND "
+            f"length(recipient_phone) <= {RECIPIENT_PHONE_MAX_LENGTH}",
             name="recipient_phone_length",
         ),
         CheckConstraint(
-            f"length(sender_name) BETWEEN 1 AND {SENDER_NAME_MAX_LENGTH}",
+            f"length(trim(sender_name)) >= 1 AND length(sender_name) <= {SENDER_NAME_MAX_LENGTH}",
             name="sender_name_length",
         ),
         CheckConstraint(
