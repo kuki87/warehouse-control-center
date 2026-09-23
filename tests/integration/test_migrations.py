@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "users",
     "couriers",
     "shipments",
+    "shipment_number_sequences",
     "shipment_problems",
     "shipment_status_history",
     "audit_events",
@@ -505,6 +506,171 @@ def test_runtime_expected_revision_matches_alembic_head(test_settings: Settings)
         script = ScriptDirectory.from_config(config)
 
         assert script.get_heads() == [EXPECTED_SCHEMA_REVISION]
+
+
+@pytest.mark.parametrize(
+    ("identifiers", "expected_next"),
+    [
+        ([], 1),
+        (["ABC123", "X018123456"], 1),
+        (["E000000001"], 2),
+        (["E000000001", "E000000009", "E000000004"], 10),
+        (["E123456789"], 123_456_790),
+        (["E999999999"], 1_000_000_000),
+        (["e000000010", "E0000010", "E00000001A"], 1),
+    ],
+)
+def test_automatic_numbering_migration_initializes_from_exact_legacy_identifiers(
+    test_settings: Settings,
+    identifiers: list[str],
+    expected_next: int,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0004_shipments_domain")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            for index, identifier in enumerate(identifiers, start=1):
+                connection.execute(
+                    text(
+                        "INSERT INTO shipments "
+                        "(tracking_number, tracking_number_normalized, barcode, "
+                        "barcode_normalized, recipient_name, recipient_address, "
+                        "recipient_city, recipient_phone, sender_name, status, received_at, "
+                        "created_by, version) VALUES (:tracking, :tracking, :barcode, "
+                        ":barcode, 'Name', 'Address', 'City', '123', 'Sender', "
+                        "'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
+                    ),
+                    {
+                        "tracking": identifier,
+                        "barcode": f"LEGACY-BAR-{index}",
+                        "user_id": user_id,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT next_value FROM shipment_number_sequences "
+                        "WHERE name = 'shipment_number'"
+                    )
+                )
+                == expected_next
+            )
+            assert (
+                list(
+                    connection.execute(
+                        text("SELECT tracking_number FROM shipments ORDER BY id")
+                    ).scalars()
+                )
+                == identifiers
+            )
+    finally:
+        engine.dispose()
+
+
+def test_automatic_numbering_migration_considers_compatible_legacy_barcodes(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0004_shipments_domain")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES ('LEGACY-1', 'LEGACY-1', 'E000000050', 'E000000050', "
+                    "'Name', 'Address', 'City', '123', 'Sender', 'RECEIVED', "
+                    "CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT next_value FROM shipment_number_sequences")) == 51
+            assert connection.execute(
+                text("SELECT tracking_number, barcode FROM shipments")
+            ).one() == ("LEGACY-1", "E000000050")
+    finally:
+        engine.dispose()
+
+
+def test_automatic_numbering_downgrade_and_reupgrade_recomputes_safely(
+    test_settings: Settings,
+) -> None:
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES ('E000000007', 'E000000007', 'E000000007', 'E000000007', "
+                    "'Name', 'Address', 'City', '123', 'Sender', 'RECEIVED', "
+                    "CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.downgrade(config, "0004_shipments_domain")
+        command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT next_value FROM shipment_number_sequences")) == 8
+            assert connection.scalar(text("SELECT tracking_number FROM shipments")) == (
+                "E000000007"
+            )
+    finally:
+        engine.dispose()
 
 
 def test_exact_identifier_lookups_use_unique_indexes(engine: Engine) -> None:

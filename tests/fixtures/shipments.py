@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from warehouse_control_center.application.dto import SessionContext, ShipmentDTO
@@ -44,14 +44,11 @@ class ShipmentHarness:
     operator: SessionContext
     supervisor: SessionContext
     clock: FakeClock
-    _sequence: int = field(default=0, init=False)
 
     def create(
         self,
         *,
         session: SessionContext | None = None,
-        tracking_number: str | None = None,
-        barcode: str | None = None,
         recipient_name: str = "Željko Šarić",
         recipient_address: str = "Ćirila i Metodija 10",
         recipient_city: str = "Banja Luka",
@@ -59,11 +56,8 @@ class ShipmentHarness:
         sender_name: str = "Đorđe Čavić",
         notes: str | None = None,
     ) -> ShipmentDTO:
-        self._sequence += 1
         return self.service.create_shipment(
             session or self.admin,
-            tracking_number=tracking_number or f"TRK-{self._sequence:06d}",
-            barcode=barcode or f"BAR-{self._sequence:06d}",
             recipient_name=recipient_name,
             recipient_address=recipient_address,
             recipient_city=recipient_city,

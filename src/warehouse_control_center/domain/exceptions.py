@@ -93,6 +93,14 @@ class DuplicateBarcodeError(WarehouseControlCenterError):
     """Raised when a normalized barcode is already reserved."""
 
 
+class ShipmentNumberExhaustedError(WarehouseControlCenterError):
+    """Raised when the visible shipment-number range has no value remaining."""
+
+
+class ShipmentNumberAllocationError(WarehouseControlCenterError):
+    """Raised when the configured shipment-number sequence cannot allocate safely."""
+
+
 class ShipmentConflictError(WarehouseControlCenterError):
     """Raised when optimistic concurrency detects a stale shipment version."""
 

@@ -37,6 +37,8 @@ from warehouse_control_center.domain.enums import (
     ShipmentStatus,
 )
 from warehouse_control_center.domain.exceptions import (
+    DuplicateBarcodeError,
+    DuplicateTrackingNumberError,
     InvalidPasswordError,
     InvalidShipmentError,
     InvalidShipmentQueryError,
@@ -46,6 +48,7 @@ from warehouse_control_center.domain.exceptions import (
     ShipmentArchivedError,
     ShipmentConflictError,
     ShipmentNotFoundError,
+    ShipmentNumberAllocationError,
     ShipmentProblemNotFoundError,
     ShipmentProblemOpenError,
 )
@@ -54,6 +57,7 @@ from warehouse_control_center.domain.shipment_validation import (
     validate_problem,
     validate_search_text,
     validate_shipment_fields,
+    validate_shipment_metadata,
     validate_status_reason,
 )
 from warehouse_control_center.domain.shipment_workflow import (
@@ -88,8 +92,6 @@ class ShipmentService:
         self,
         session: SessionContext,
         *,
-        tracking_number: str,
-        barcode: str,
         recipient_name: str,
         recipient_address: str,
         recipient_city: str,
@@ -97,9 +99,7 @@ class ShipmentService:
         sender_name: str,
         notes: str | None = None,
     ) -> ShipmentDTO:
-        fields = validate_shipment_fields(
-            tracking_number=tracking_number,
-            barcode=barcode,
+        fields = validate_shipment_metadata(
             recipient_name=recipient_name,
             recipient_address=recipient_address,
             recipient_city=recipient_city,
@@ -109,25 +109,31 @@ class ShipmentService:
         )
         with self._uow_factory() as uow:
             actor = _require_current_actor(uow, session, Permission.CREATE_SHIPMENT)
+            shipment_number = uow.shipment_numbers.allocate()
             now = utc_timestamp(self._clock.now())
-            shipment = uow.shipments.add(
-                Shipment(
-                    tracking_number=fields.tracking_number,
-                    barcode=fields.barcode,
-                    recipient_name=fields.recipient_name,
-                    recipient_address=fields.recipient_address,
-                    recipient_city=fields.recipient_city,
-                    recipient_phone=fields.recipient_phone,
-                    sender_name=fields.sender_name,
-                    notes=fields.notes,
-                    created_by=_persisted_id(actor),
-                    status=ShipmentStatus.RECEIVED,
-                    received_at=now,
-                    created_at=now,
-                    updated_at=now,
-                    version=1,
+            try:
+                shipment = uow.shipments.add(
+                    Shipment(
+                        tracking_number=shipment_number,
+                        barcode=shipment_number,
+                        recipient_name=fields.recipient_name,
+                        recipient_address=fields.recipient_address,
+                        recipient_city=fields.recipient_city,
+                        recipient_phone=fields.recipient_phone,
+                        sender_name=fields.sender_name,
+                        notes=fields.notes,
+                        created_by=_persisted_id(actor),
+                        status=ShipmentStatus.RECEIVED,
+                        received_at=now,
+                        created_at=now,
+                        updated_at=now,
+                        version=1,
+                    )
                 )
-            )
+            except (DuplicateTrackingNumberError, DuplicateBarcodeError) as error:
+                raise ShipmentNumberAllocationError(
+                    "Shipment number conflicts with an existing identifier"
+                ) from error
             uow.audits.add(
                 _shipment_audit(
                     AuditAction.SHIPMENT_CREATED,

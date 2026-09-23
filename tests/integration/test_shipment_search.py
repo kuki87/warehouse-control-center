@@ -20,16 +20,19 @@ def harness(session_factory: SessionFactory) -> ShipmentHarness:
 
 def test_exact_lookup_and_partial_search_fields(harness: ShipmentHarness) -> None:
     shipment = harness.create(
-        tracking_number=" BA-ABC-123 ",
-        barcode=" PKG-9001 ",
         recipient_name="Amila Hadžić",
         recipient_address="Trg oslobođenja 7",
         recipient_phone="+387 61 555 222",
     )
 
-    assert harness.service.get_by_tracking_number(harness.operator, "BA-ABC-123").id == shipment.id
-    assert harness.service.get_by_barcode(harness.operator, "pkg-9001").id == shipment.id
-    for term in ("Amila", "555 222", "oslobođenja", "ABC-123"):
+    assert (
+        harness.service.get_by_tracking_number(harness.operator, shipment.tracking_number).id
+        == shipment.id
+    )
+    assert (
+        harness.service.get_by_barcode(harness.operator, shipment.barcode.lower()).id == shipment.id
+    )
+    for term in ("Amila", "555 222", "oslobođenja", shipment.tracking_number[2:]):
         result = harness.service.list_shipments(harness.operator, search=term)
         assert [item.id for item in result.items] == [shipment.id]
 

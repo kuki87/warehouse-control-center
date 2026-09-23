@@ -55,6 +55,8 @@ from warehouse_control_center.presentation.qt.shipment_formatting import (
 from warehouse_control_center.presentation.qt.widgets.status_banner import StatusBanner
 from warehouse_control_center.presentation.qt.workers import DatabaseTaskRunner
 
+MutationSuccess = str | Callable[[object], str]
+
 
 class ShipmentsPage(QWidget):
     session_invalidated = Signal()
@@ -429,8 +431,6 @@ class ShipmentsPage(QWidget):
         self._mutate(
             lambda: self._shipments.create_shipment(
                 self._session,
-                tracking_number=cast(str, fields["tracking_number"]),
-                barcode=cast(str, fields["barcode"]),
                 sender_name=cast(str, fields["sender_name"]),
                 recipient_name=cast(str, fields["recipient_name"]),
                 recipient_phone=cast(str, fields["recipient_phone"]),
@@ -439,7 +439,10 @@ class ShipmentsPage(QWidget):
                 notes=fields["notes"],
             ),
             "create shipment",
-            "Shipment created successfully.",
+            lambda result: (
+                "Shipment created successfully. Shipment number: "
+                f"{cast(ShipmentDTO, result).tracking_number}"
+            ),
             dialog,
         )
 
@@ -661,7 +664,7 @@ class ShipmentsPage(QWidget):
         self,
         operation: Callable[[], object],
         context: str,
-        success: str,
+        success: MutationSuccess,
         dialog: NewShipmentDialog
         | EditShipmentDialog
         | ChangeStatusDialog
@@ -684,7 +687,7 @@ class ShipmentsPage(QWidget):
     def _mutation_complete(
         self,
         result: object,
-        success: str,
+        success: MutationSuccess,
         dialog: NewShipmentDialog
         | EditShipmentDialog
         | ChangeStatusDialog
@@ -692,10 +695,9 @@ class ShipmentsPage(QWidget):
         | ResolveProblemDialog
         | None,
     ) -> None:
-        del result
         if dialog is not None:
             dialog.accept()
-        self._pending_success = success
+        self._pending_success = success(result) if callable(success) else success
         self.refresh()
 
     def _mutation_error(

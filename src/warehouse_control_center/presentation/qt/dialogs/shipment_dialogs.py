@@ -69,8 +69,11 @@ class NewShipmentDialog(QDialog):
         layout.addWidget(title)
         form = QFormLayout()
         form.setSpacing(11)
-        self.tracking_input = _line("shipmentTracking")
-        self.barcode_input = _line("shipmentBarcode")
+        number_note = QLabel("Shipment number and barcode will be generated automatically.")
+        number_note.setObjectName("shipmentNumberNote")
+        number_note.setWordWrap(True)
+        number_note.setProperty("muted", True)
+        form.addRow("Numbering", number_note)
         self.sender_input = _line("shipmentSender")
         self.recipient_input = _line("shipmentRecipient")
         self.phone_input = _line("shipmentPhone")
@@ -80,8 +83,6 @@ class NewShipmentDialog(QDialog):
         self.notes_input.setObjectName("shipmentNotes")
         self.notes_input.setMaximumHeight(90)
         for label, field in (
-            ("Tracking number *", self.tracking_input),
-            ("Barcode *", self.barcode_input),
             ("Sender *", self.sender_input),
             ("Recipient *", self.recipient_input),
             ("Phone *", self.phone_input),
@@ -101,8 +102,6 @@ class NewShipmentDialog(QDialog):
     def _submit(self) -> None:
         values = self.values()
         required = (
-            "tracking_number",
-            "barcode",
             "sender_name",
             "recipient_name",
             "recipient_phone",
@@ -118,8 +117,6 @@ class NewShipmentDialog(QDialog):
     def values(self) -> dict[str, str | None]:
         notes = self.notes_input.toPlainText()
         return {
-            "tracking_number": self.tracking_input.text(),
-            "barcode": self.barcode_input.text(),
             "sender_name": self.sender_input.text(),
             "recipient_name": self.recipient_input.text(),
             "recipient_phone": self.phone_input.text(),
@@ -130,8 +127,6 @@ class NewShipmentDialog(QDialog):
 
     def set_busy(self, busy: bool) -> None:
         for field in (
-            self.tracking_input,
-            self.barcode_input,
             self.sender_input,
             self.recipient_input,
             self.phone_input,

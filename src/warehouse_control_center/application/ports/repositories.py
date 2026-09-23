@@ -96,6 +96,12 @@ class ShipmentRepository(Protocol):
     def get_open_problem(self, shipment_id: int) -> ShipmentProblem | None: ...
 
 
+class ShipmentNumberRepository(Protocol):
+    """Allocate visible shipment numbers without exposing sequence persistence."""
+
+    def allocate(self) -> str: ...
+
+
 class AuditRepository(Protocol):
     """Append-only audit persistence; update and delete are intentionally absent."""
 

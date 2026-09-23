@@ -25,15 +25,41 @@ _PHONE_PUNCTUATION = frozenset("+()-./ ")
 
 
 @dataclass(frozen=True, slots=True)
-class ValidatedShipmentFields:
-    tracking_number: str
-    barcode: str
+class ValidatedShipmentMetadata:
     recipient_name: str
     recipient_address: str
     recipient_city: str
     recipient_phone: str
     sender_name: str
     notes: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedShipmentFields(ValidatedShipmentMetadata):
+    tracking_number: str
+    barcode: str
+
+
+def validate_shipment_metadata(
+    *,
+    recipient_name: str,
+    recipient_address: str,
+    recipient_city: str,
+    recipient_phone: str,
+    sender_name: str,
+    notes: str | None,
+) -> ValidatedShipmentMetadata:
+    """Validate editable shipment metadata before allocating a sequence value."""
+    return ValidatedShipmentMetadata(
+        recipient_name=_required_text("Recipient name", recipient_name, RECIPIENT_NAME_MAX_LENGTH),
+        recipient_address=_required_text(
+            "Recipient address", recipient_address, RECIPIENT_ADDRESS_MAX_LENGTH
+        ),
+        recipient_city=_required_text("Recipient city", recipient_city, RECIPIENT_CITY_MAX_LENGTH),
+        recipient_phone=validate_phone(recipient_phone),
+        sender_name=_required_text("Sender name", sender_name, SENDER_NAME_MAX_LENGTH),
+        notes=_optional_text("Notes", notes, NOTES_MAX_LENGTH, allow_line_breaks=True),
+    )
 
 
 def validate_shipment_fields(
@@ -48,19 +74,25 @@ def validate_shipment_fields(
     notes: str | None,
 ) -> ValidatedShipmentFields:
     """Validate and return canonical display values without silent truncation."""
+    metadata = validate_shipment_metadata(
+        recipient_name=recipient_name,
+        recipient_address=recipient_address,
+        recipient_city=recipient_city,
+        recipient_phone=recipient_phone,
+        sender_name=sender_name,
+        notes=notes,
+    )
     return ValidatedShipmentFields(
+        recipient_name=metadata.recipient_name,
+        recipient_address=metadata.recipient_address,
+        recipient_city=metadata.recipient_city,
+        recipient_phone=metadata.recipient_phone,
+        sender_name=metadata.sender_name,
+        notes=metadata.notes,
         tracking_number=_required_text(
             "Tracking number", tracking_number, TRACKING_NUMBER_MAX_LENGTH
         ),
         barcode=_required_text("Barcode", barcode, BARCODE_MAX_LENGTH),
-        recipient_name=_required_text("Recipient name", recipient_name, RECIPIENT_NAME_MAX_LENGTH),
-        recipient_address=_required_text(
-            "Recipient address", recipient_address, RECIPIENT_ADDRESS_MAX_LENGTH
-        ),
-        recipient_city=_required_text("Recipient city", recipient_city, RECIPIENT_CITY_MAX_LENGTH),
-        recipient_phone=validate_phone(recipient_phone),
-        sender_name=_required_text("Sender name", sender_name, SENDER_NAME_MAX_LENGTH),
-        notes=_optional_text("Notes", notes, NOTES_MAX_LENGTH, allow_line_breaks=True),
     )
 
 

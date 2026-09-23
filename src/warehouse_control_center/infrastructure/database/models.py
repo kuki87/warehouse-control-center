@@ -22,6 +22,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
+from warehouse_control_center.domain.shipment_numbering import (
+    SHIPMENT_NUMBER_EXHAUSTED_VALUE,
+)
 from warehouse_control_center.domain.shipment_validation import (
     BARCODE_MAX_LENGTH,
     NOTES_MAX_LENGTH,
@@ -132,6 +135,25 @@ class CourierModel(TimestampMixin, Base):
         Boolean, default=True, server_default=text("1"), nullable=False
     )
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class ShipmentNumberSequenceModel(Base):
+    __tablename__ = "shipment_number_sequences"
+    __table_args__ = (
+        CheckConstraint("length(trim(name)) BETWEEN 1 AND 64", name="name_length"),
+        CheckConstraint(
+            f"next_value BETWEEN 1 AND {SHIPMENT_NUMBER_EXHAUSTED_VALUE}",
+            name="next_value_range",
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    next_value: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default=text("1"),
+        nullable=False,
+    )
 
 
 class ShipmentModel(TimestampMixin, Base):

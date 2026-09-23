@@ -18,6 +18,8 @@ from warehouse_control_center.domain.exceptions import (
     ShipmentArchivedError,
     ShipmentConflictError,
     ShipmentNotFoundError,
+    ShipmentNumberAllocationError,
+    ShipmentNumberExhaustedError,
     ShipmentProblemNotFoundError,
     ShipmentProblemOpenError,
     UserNotFoundError,
@@ -54,6 +56,10 @@ def translate_error(error: BaseException) -> UIError:
         return UIError("This shipment was changed by another operation. Refresh and try again.")
     if isinstance(error, ShipmentNotFoundError):
         return UIError("The shipment no longer exists. Refresh the list and try again.")
+    if isinstance(error, ShipmentNumberExhaustedError):
+        return UIError("Shipment number capacity is exhausted. Contact an administrator.")
+    if isinstance(error, ShipmentNumberAllocationError):
+        return UIError("A shipment number could not be allocated safely. Please try again.")
     if isinstance(error, ShipmentArchivedError):
         return UIError("Archived shipments cannot be changed. Restore the shipment first.")
     if isinstance(error, ShipmentProblemOpenError):

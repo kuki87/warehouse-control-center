@@ -7,6 +7,7 @@ from typing import Protocol, Self
 from warehouse_control_center.application.ports.repositories import (
     AuditRepository,
     CourierRepository,
+    ShipmentNumberRepository,
     ShipmentRepository,
     UserRepository,
 )
@@ -21,6 +22,9 @@ class UnitOfWork(Protocol):
 
     @property
     def shipments(self) -> ShipmentRepository: ...
+
+    @property
+    def shipment_numbers(self) -> ShipmentNumberRepository: ...
 
     @property
     def audits(self) -> AuditRepository: ...

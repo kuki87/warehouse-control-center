@@ -12,8 +12,6 @@ from tests.fixtures.shipments import ShipmentHarness, build_shipment_harness
 from warehouse_control_center.application.dto import SessionContext
 from warehouse_control_center.domain.enums import AuditAction, ProblemType, ShipmentStatus, UserRole
 from warehouse_control_center.domain.exceptions import (
-    DuplicateBarcodeError,
-    DuplicateTrackingNumberError,
     InvalidShipmentError,
     InvalidShipmentTransitionError,
     PermissionDeniedError,
@@ -26,6 +24,7 @@ from warehouse_control_center.infrastructure.database.engine import SessionFacto
 from warehouse_control_center.infrastructure.database.models import (
     AuditEventModel,
     ShipmentModel,
+    ShipmentNumberSequenceModel,
     ShipmentProblemModel,
     ShipmentStatusHistoryModel,
     UserModel,
@@ -92,15 +91,14 @@ def test_create_shipment_sets_received_state_and_atomic_audit(
         assert event.details_json == {"tracking_number": shipment.tracking_number}
 
 
-def test_duplicate_identifiers_translate_to_specific_application_errors(
+def test_creation_allocates_sequential_tracking_and_barcode_values(
     harness: ShipmentHarness,
 ) -> None:
-    harness.create(tracking_number=" ABC-123 ", barcode=" BAR-123 ")
+    first = harness.create()
+    second = harness.create()
 
-    with pytest.raises(DuplicateTrackingNumberError):
-        harness.create(tracking_number="ABC-123", barcode="BAR-OTHER")
-    with pytest.raises(DuplicateBarcodeError):
-        harness.create(tracking_number="TRK-OTHER", barcode="BAR-123")
+    assert first.tracking_number == first.barcode == "E000000001"
+    assert second.tracking_number == second.barcode == "E000000002"
 
 
 def test_missing_inactive_and_forged_actor_sessions_are_rejected(
@@ -596,6 +594,8 @@ def test_creation_audit_failure_rolls_back_everything(
         harness.create()
     assert _count(session_factory, ShipmentModel) == 0
     assert _count(session_factory, AuditEventModel) == audit_count
+    with session_factory() as database:
+        assert database.scalar(select(ShipmentNumberSequenceModel.next_value)) == 1
 
 
 def test_creation_commit_failure_rolls_back_flushed_shipment_and_audit(
@@ -614,6 +614,8 @@ def test_creation_commit_failure_rolls_back_flushed_shipment_and_audit(
         harness.create()
     assert _count(session_factory, ShipmentModel) == 0
     assert _count(session_factory, AuditEventModel) == audit_count
+    with session_factory() as database:
+        assert database.scalar(select(ShipmentNumberSequenceModel.next_value)) == 1
 
 
 def test_status_history_failure_rolls_back_shipment_change(

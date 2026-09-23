@@ -4,7 +4,7 @@ from sqlalchemy import Engine, inspect, text
 
 from warehouse_control_center.domain.exceptions import DatabaseSchemaError
 
-EXPECTED_SCHEMA_REVISION = "0004_shipments_domain"
+EXPECTED_SCHEMA_REVISION = "0005_automatic_shipment_numbering"
 REQUIRED_SCHEMA_TABLES = frozenset(
     {
         "alembic_version",
@@ -12,6 +12,7 @@ REQUIRED_SCHEMA_TABLES = frozenset(
         "couriers",
         "shipment_status_history",
         "shipment_problems",
+        "shipment_number_sequences",
         "shipments",
         "users",
     }

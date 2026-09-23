@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 from PySide6.QtCore import Qt, QThreadPool
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QLineEdit, QPushButton
 from pytestqt.qtbot import QtBot
 
 from warehouse_control_center.application.dto import (
@@ -23,13 +23,13 @@ from warehouse_control_center.application.dto import (
 )
 from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
 from warehouse_control_center.domain.exceptions import (
-    DuplicateBarcodeError,
-    DuplicateTrackingNumberError,
     InvalidShipmentError,
     InvalidShipmentTransitionError,
     PermissionDeniedError,
     ShipmentArchivedError,
     ShipmentConflictError,
+    ShipmentNumberAllocationError,
+    ShipmentNumberExhaustedError,
     ShipmentProblemOpenError,
 )
 from warehouse_control_center.presentation.qt.dialogs.confirm_dialog import ConfirmDialog
@@ -132,8 +132,8 @@ class FakeShipmentService:
         self._call("create_shipment", **kwargs)
         created = replace(
             _shipment(),
-            tracking_number=cast(str, kwargs["tracking_number"]),
-            barcode=cast(str, kwargs["barcode"]),
+            tracking_number="E000000123",
+            barcode="E000000123",
             recipient_name=cast(str, kwargs["recipient_name"]),
         )
         self.records = [created]
@@ -387,8 +387,8 @@ def test_stale_session_error_invalidates_desktop_session(
 @pytest.mark.parametrize(
     ("error", "message"),
     [
-        (DuplicateTrackingNumberError("raw"), "tracking number"),
-        (DuplicateBarcodeError("raw"), "barcode"),
+        (ShipmentNumberExhaustedError("raw"), "capacity is exhausted"),
+        (ShipmentNumberAllocationError("raw"), "allocated safely"),
         (InvalidShipmentError("Phone is invalid"), "Phone is invalid"),
     ],
 )
@@ -402,10 +402,10 @@ def test_new_shipment_validation_submission_and_errors(
     page = _page(qtbot, thread_pool, service)
     qtbot.mouseClick(page.new_button, Qt.MouseButton.LeftButton)
     dialog = cast(NewShipmentDialog, page._new_dialog)
+    assert dialog.findChild(QLineEdit, "shipmentTracking") is None
+    assert dialog.findChild(QLineEdit, "shipmentBarcode") is None
     qtbot.mouseClick(dialog.create_button, Qt.MouseButton.LeftButton)
     assert "required" in dialog.status.message
-    dialog.tracking_input.setText("NEW-1")
-    dialog.barcode_input.setText("NB-1")
     dialog.sender_input.setText("Pošiljalac")
     dialog.recipient_input.setText("Primalac")
     dialog.phone_input.setText("+387 65 111 222")
@@ -426,8 +426,6 @@ def test_create_and_edit_success_use_supported_fields_and_expected_version(
     qtbot.mouseClick(page.new_button, Qt.MouseButton.LeftButton)
     create = cast(NewShipmentDialog, page._new_dialog)
     for field, value in (
-        (create.tracking_input, "NEW-1"),
-        (create.barcode_input, "NB-1"),
         (create.sender_input, "Pošiljalac"),
         (create.recipient_input, "Primalac"),
         (create.phone_input, "+387 65 111 222"),
@@ -437,7 +435,11 @@ def test_create_and_edit_success_use_supported_fields_and_expected_version(
         field.setText(value)
     qtbot.mouseClick(create.create_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: not create.isVisible(), timeout=3_000)
-    qtbot.waitUntil(lambda: page.table.item(0, 0).text() == "NEW-1", timeout=3_000)
+    qtbot.waitUntil(lambda: page.table.item(0, 0).text() == "E000000123", timeout=3_000)
+    assert "E000000123" in page.status.message
+    create_call = next(call for call in service.calls if call[0] == "create_shipment")
+    assert "tracking_number" not in create_call[2]
+    assert "barcode" not in create_call[2]
 
     page.table.selectRow(0)
     qtbot.mouseClick(page.edit_button, Qt.MouseButton.LeftButton)

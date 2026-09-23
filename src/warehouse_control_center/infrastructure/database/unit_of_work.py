@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from warehouse_control_center.application.ports.repositories import (
     AuditRepository,
     CourierRepository,
+    ShipmentNumberRepository,
     ShipmentRepository,
     UserRepository,
 )
@@ -16,6 +17,7 @@ from warehouse_control_center.infrastructure.database.engine import SessionFacto
 from warehouse_control_center.infrastructure.database.repositories import (
     SqlAlchemyAuditRepository,
     SqlAlchemyCourierRepository,
+    SqlAlchemyShipmentNumberRepository,
     SqlAlchemyShipmentRepository,
     SqlAlchemyUserRepository,
 )
@@ -30,6 +32,7 @@ class SqlAlchemyUnitOfWork:
         self._users: UserRepository | None = None
         self._couriers: CourierRepository | None = None
         self._shipments: ShipmentRepository | None = None
+        self._shipment_numbers: ShipmentNumberRepository | None = None
         self._audits: AuditRepository | None = None
         self.closed = True
 
@@ -58,6 +61,12 @@ class SqlAlchemyUnitOfWork:
         return self._shipments
 
     @property
+    def shipment_numbers(self) -> ShipmentNumberRepository:
+        if self._shipment_numbers is None:
+            raise RuntimeError("Unit of Work is not active")
+        return self._shipment_numbers
+
+    @property
     def audits(self) -> AuditRepository:
         if self._audits is None:
             raise RuntimeError("Unit of Work is not active")
@@ -70,6 +79,7 @@ class SqlAlchemyUnitOfWork:
         self._users = SqlAlchemyUserRepository(self._session)
         self._couriers = SqlAlchemyCourierRepository(self._session)
         self._shipments = SqlAlchemyShipmentRepository(self._session)
+        self._shipment_numbers = SqlAlchemyShipmentNumberRepository(self._session)
         self._audits = SqlAlchemyAuditRepository(self._session)
         self.closed = False
         return self
@@ -89,6 +99,7 @@ class SqlAlchemyUnitOfWork:
             self._users = None
             self._couriers = None
             self._shipments = None
+            self._shipment_numbers = None
             self._audits = None
             self.closed = True
 
