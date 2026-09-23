@@ -294,6 +294,16 @@ class ShipmentService:
                 for item in uow.shipments.list_history(shipment_id)
             )
 
+    def get_open_problem(
+        self, session: SessionContext, shipment_id: int
+    ) -> ShipmentProblemDTO | None:
+        """Return the unresolved problem without exposing repository entities to the UI."""
+        with self._uow_factory() as uow:
+            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            _get_shipment(uow, shipment_id)
+            problem = uow.shipments.get_open_problem(shipment_id)
+            return ShipmentProblemDTO.from_entity(problem) if problem is not None else None
+
     def change_status(
         self,
         session: SessionContext,

@@ -108,6 +108,8 @@ class DesktopApplication(QObject):
             self._resources.users,
             self._thread_pool,
             self._logger,
+            shipments=self._resources.shipments,
+            timezone_name=self._resources.settings.timezone,
         )
         self.main_window = window
         window.logout_requested.connect(lambda: self._begin_logout(exit_after=False))

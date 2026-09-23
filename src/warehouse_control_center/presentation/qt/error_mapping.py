@@ -6,12 +6,20 @@ from dataclasses import dataclass
 from warehouse_control_center.domain.exceptions import (
     AuthenticationError,
     DatabaseBusyError,
+    DuplicateBarcodeError,
+    DuplicateTrackingNumberError,
     DuplicateUserError,
     InvalidCurrentPasswordError,
+    InvalidShipmentTransitionError,
     InvalidUserStateError,
     LastActiveAdministratorError,
     PasswordChangeRequiredError,
     PermissionDeniedError,
+    ShipmentArchivedError,
+    ShipmentConflictError,
+    ShipmentNotFoundError,
+    ShipmentProblemNotFoundError,
+    ShipmentProblemOpenError,
     UserNotFoundError,
     ValidationError,
 )
@@ -38,6 +46,22 @@ def translate_error(error: BaseException) -> UIError:
         return UIError("Invalid username or password.")
     if isinstance(error, DuplicateUserError):
         return UIError("That username is already reserved.")
+    if isinstance(error, DuplicateTrackingNumberError):
+        return UIError("That tracking number is already reserved.")
+    if isinstance(error, DuplicateBarcodeError):
+        return UIError("That barcode is already reserved.")
+    if isinstance(error, ShipmentConflictError):
+        return UIError("This shipment was changed by another operation. Refresh and try again.")
+    if isinstance(error, ShipmentNotFoundError):
+        return UIError("The shipment no longer exists. Refresh the list and try again.")
+    if isinstance(error, ShipmentArchivedError):
+        return UIError("Archived shipments cannot be changed. Restore the shipment first.")
+    if isinstance(error, ShipmentProblemOpenError):
+        return UIError("This shipment already has an unresolved problem.")
+    if isinstance(error, ShipmentProblemNotFoundError):
+        return UIError("This shipment has no unresolved problem.")
+    if isinstance(error, InvalidShipmentTransitionError):
+        return UIError(str(error))
     if isinstance(error, LastActiveAdministratorError):
         return UIError("At least one active administrator must remain.")
     if isinstance(error, PasswordChangeRequiredError):

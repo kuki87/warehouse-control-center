@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
@@ -190,12 +190,19 @@ class FakeUsers:
 
 
 @dataclass
+class FakeSettings:
+    timezone: str = "UTC"
+
+
+@dataclass
 class FakeResources:
     authentication: FakeAuthentication
     users: FakeUsers
     logger: logging.Logger
     initial_administrator: TemporaryCredential | None = None
     shutdown_called: bool = False
+    shipments: object | None = None
+    settings: FakeSettings = field(default_factory=FakeSettings)
 
     def shutdown(self) -> None:
         self.shutdown_called = True

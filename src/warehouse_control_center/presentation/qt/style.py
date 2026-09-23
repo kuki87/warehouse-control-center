@@ -26,15 +26,20 @@ QLabel#fieldLabel {
     color: #344054;
     font-weight: 600;
 }
-QLineEdit, QComboBox {
+QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {
     background: white;
     border: 1px solid #cfd6e1;
     border-radius: 6px;
     min-height: 38px;
     padding: 0 10px;
 }
-QLineEdit:focus, QComboBox:focus {
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus {
     border: 2px solid #2563eb;
+}
+QFrame#filterCard {
+    background: white;
+    border: 1px solid #dfe4ec;
+    border-radius: 8px;
 }
 QPushButton {
     background: #2563eb;
