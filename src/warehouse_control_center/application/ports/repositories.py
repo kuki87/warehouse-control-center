@@ -6,10 +6,12 @@ from typing import Literal, Protocol
 
 from warehouse_control_center.domain.entities import (
     AuditEvent,
+    Client,
     Courier,
     Shipment,
     ShipmentProblem,
     ShipmentStatusHistory,
+    ShipmentWeightCheck,
     User,
 )
 from warehouse_control_center.domain.enums import ShipmentStatus
@@ -72,6 +74,18 @@ class CourierRepository(Protocol):
     def get_by_normalized_code(self, courier_code: str) -> Courier | None: ...
 
 
+class ClientRepository(Protocol):
+    def add(self, client: Client) -> Client: ...
+
+    def save(self, client: Client) -> Client: ...
+
+    def get_by_id(self, client_id: int) -> Client | None: ...
+
+    def get_by_normalized_code(self, client_code: str) -> Client | None: ...
+
+    def list_clients(self, *, search: str | None, active_only: bool) -> list[Client]: ...
+
+
 class ShipmentRepository(Protocol):
     def add(self, shipment: Shipment) -> Shipment: ...
 
@@ -92,6 +106,10 @@ class ShipmentRepository(Protocol):
     def save_problem(self, problem: ShipmentProblem) -> ShipmentProblem: ...
 
     def get_open_problem(self, shipment_id: int) -> ShipmentProblem | None: ...
+
+    def add_weight_check(self, check: ShipmentWeightCheck) -> ShipmentWeightCheck: ...
+
+    def list_weight_checks(self, shipment_id: int) -> list[ShipmentWeightCheck]: ...
 
 
 class ShipmentNumberRepository(Protocol):

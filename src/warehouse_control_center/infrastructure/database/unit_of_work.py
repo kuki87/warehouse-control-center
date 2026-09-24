@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from warehouse_control_center.application.ports.repositories import (
     AuditRepository,
+    ClientRepository,
     CourierRepository,
     ShipmentNumberRepository,
     ShipmentRepository,
@@ -16,6 +17,7 @@ from warehouse_control_center.application.ports.repositories import (
 from warehouse_control_center.infrastructure.database.engine import SessionFactory
 from warehouse_control_center.infrastructure.database.repositories import (
     SqlAlchemyAuditRepository,
+    SqlAlchemyClientRepository,
     SqlAlchemyCourierRepository,
     SqlAlchemyShipmentNumberRepository,
     SqlAlchemyShipmentRepository,
@@ -31,6 +33,7 @@ class SqlAlchemyUnitOfWork:
         self._session: Session | None = None
         self._users: UserRepository | None = None
         self._couriers: CourierRepository | None = None
+        self._clients: ClientRepository | None = None
         self._shipments: ShipmentRepository | None = None
         self._shipment_numbers: ShipmentNumberRepository | None = None
         self._audits: AuditRepository | None = None
@@ -53,6 +56,12 @@ class SqlAlchemyUnitOfWork:
         if self._couriers is None:
             raise RuntimeError("Unit of Work is not active")
         return self._couriers
+
+    @property
+    def clients(self) -> ClientRepository:
+        if self._clients is None:
+            raise RuntimeError("Unit of Work is not active")
+        return self._clients
 
     @property
     def shipments(self) -> ShipmentRepository:
@@ -78,6 +87,7 @@ class SqlAlchemyUnitOfWork:
         self._session = self._session_factory()
         self._users = SqlAlchemyUserRepository(self._session)
         self._couriers = SqlAlchemyCourierRepository(self._session)
+        self._clients = SqlAlchemyClientRepository(self._session)
         self._shipments = SqlAlchemyShipmentRepository(self._session)
         self._shipment_numbers = SqlAlchemyShipmentNumberRepository(self._session)
         self._audits = SqlAlchemyAuditRepository(self._session)
@@ -98,6 +108,7 @@ class SqlAlchemyUnitOfWork:
             self._session = None
             self._users = None
             self._couriers = None
+            self._clients = None
             self._shipments = None
             self._shipment_numbers = None
             self._audits = None

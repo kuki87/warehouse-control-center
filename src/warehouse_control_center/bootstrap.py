@@ -11,6 +11,7 @@ from warehouse_control_center.application.dto import TemporaryCredential
 from warehouse_control_center.application.ports.unit_of_work import UnitOfWork
 from warehouse_control_center.application.services import (
     AuthenticationService,
+    ClientService,
     FirstRunAdministratorService,
     ShipmentService,
     UserService,
@@ -40,6 +41,7 @@ class ApplicationResources:
     engine: Engine
     authentication: AuthenticationService
     users: UserService
+    clients: ClientService
     shipments: ShipmentService
     initial_administrator: TemporaryCredential | None
 
@@ -89,6 +91,7 @@ def bootstrap(settings: Settings | None = None) -> ApplicationResources:
             clock,
         )
         shipments = ShipmentService(uow_factory, clock)
+        clients = ClientService(uow_factory, clock)
         if initial_administrator is not None:
             logger.info("First-run administrator initialized; temporary credential not logged")
         return ApplicationResources(
@@ -98,6 +101,7 @@ def bootstrap(settings: Settings | None = None) -> ApplicationResources:
             authentication=authentication,
             users=users,
             shipments=shipments,
+            clients=clients,
             initial_administrator=initial_administrator,
         )
     except Exception:

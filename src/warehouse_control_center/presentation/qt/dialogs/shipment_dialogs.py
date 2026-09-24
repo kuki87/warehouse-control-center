@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -23,9 +26,11 @@ from PySide6.QtWidgets import (
 )
 
 from warehouse_control_center.application.dto import (
+    ClientDTO,
     ShipmentDTO,
     ShipmentProblemDTO,
     ShipmentStatusHistoryDTO,
+    ShipmentWeightCheckDTO,
 )
 from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus
 from warehouse_control_center.domain.shipment_workflow import can_recover, can_transition
@@ -53,10 +58,28 @@ def _dialog_actions(dialog: QDialog, submit: QPushButton) -> QHBoxLayout:
     return actions
 
 
+def _kilograms_to_grams(value: str, label: str) -> int | None:
+    canonical = value.strip()
+    if not canonical:
+        return None
+    try:
+        kilograms = Decimal(canonical)
+    except InvalidOperation:
+        raise ValueError(f"{label} must be a valid number") from None
+    grams = kilograms * 1000
+    if not kilograms.is_finite() or kilograms <= 0 or grams != grams.to_integral_value():
+        raise ValueError(f"{label} must be positive and precise to one gram")
+    return int(grams)
+
+
 class NewShipmentDialog(QDialog):
     create_requested = Signal(object)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        clients: tuple[ClientDTO, ...] = (),
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("New shipment")
         self.setModal(True)
@@ -74,20 +97,49 @@ class NewShipmentDialog(QDialog):
         number_note.setWordWrap(True)
         number_note.setProperty("muted", True)
         form.addRow("Numbering", number_note)
+        self.client_input = QComboBox()
+        self.client_input.setObjectName("shipmentSenderClient")
+        self.client_input.setEditable(True)
+        self.client_input.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.client_input.addItem("Walk-in / manual sender", None)
+        self._client_names: dict[int, str] = {}
+        for client in clients:
+            self._client_names[client.id] = client.company_name
+            self.client_input.addItem(f"{client.client_code} — {client.company_name}", client.id)
+        completer = self.client_input.completer()
+        assert completer is not None
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.client_input.currentIndexChanged.connect(self._client_changed)
         self.sender_input = _line("shipmentSender")
         self.recipient_input = _line("shipmentRecipient")
         self.phone_input = _line("shipmentPhone")
         self.address_input = _line("shipmentAddress")
         self.city_input = _line("shipmentCity")
+        self.package_count_input = QSpinBox()
+        self.package_count_input.setObjectName("shipmentPackageCount")
+        self.package_count_input.setRange(1, 2_147_483_647)
+        self.length_input = _line("shipmentLengthCm")
+        self.width_input = _line("shipmentWidthCm")
+        self.height_input = _line("shipmentHeightCm")
+        self.declared_weight_input = _line("shipmentDeclaredWeightKg")
+        self.declared_weight_input.setPlaceholderText("kg")
         self.notes_input = QPlainTextEdit()
         self.notes_input.setObjectName("shipmentNotes")
         self.notes_input.setMaximumHeight(90)
         for label, field in (
+            ("Contract client", self.client_input),
             ("Sender *", self.sender_input),
             ("Recipient *", self.recipient_input),
             ("Phone *", self.phone_input),
             ("Address *", self.address_input),
             ("City *", self.city_input),
+            ("Package count *", self.package_count_input),
+            ("Length (cm)", self.length_input),
+            ("Width (cm)", self.width_input),
+            ("Height (cm)", self.height_input),
+            ("Declared weight (kg)", self.declared_weight_input),
             ("Notes", self.notes_input),
         ):
             form.addRow(label, field)
@@ -100,7 +152,11 @@ class NewShipmentDialog(QDialog):
         layout.addLayout(_dialog_actions(self, self.create_button))
 
     def _submit(self) -> None:
-        values = self.values()
+        try:
+            values = self.values()
+        except ValueError as error:
+            self.status.show_message(str(error))
+            return
         required = (
             "sender_name",
             "recipient_name",
@@ -114,29 +170,110 @@ class NewShipmentDialog(QDialog):
         self.status.clear()
         self.create_requested.emit(values)
 
-    def values(self) -> dict[str, str | None]:
+    def values(self) -> dict[str, object]:
         notes = self.notes_input.toPlainText()
+        client_id = self.client_input.currentData()
         return {
             "sender_name": self.sender_input.text(),
+            "sender_client_id": client_id if isinstance(client_id, int) else None,
             "recipient_name": self.recipient_input.text(),
             "recipient_phone": self.phone_input.text(),
             "recipient_address": self.address_input.text(),
             "recipient_city": self.city_input.text(),
+            "package_count": self.package_count_input.value(),
+            "length_cm": self.length_input.text().strip() or None,
+            "width_cm": self.width_input.text().strip() or None,
+            "height_cm": self.height_input.text().strip() or None,
+            "declared_weight_g": _kilograms_to_grams(
+                self.declared_weight_input.text(), "Declared weight"
+            ),
             "notes": notes if notes.strip() else None,
         }
 
+    def _client_changed(self) -> None:
+        client_id = self.client_input.currentData()
+        selected = isinstance(client_id, int)
+        if selected:
+            self.sender_input.setText(self._client_names[client_id])
+        self.sender_input.setReadOnly(selected)
+
     def set_busy(self, busy: bool) -> None:
         for field in (
+            self.client_input,
             self.sender_input,
             self.recipient_input,
             self.phone_input,
             self.address_input,
             self.city_input,
+            self.package_count_input,
+            self.length_input,
+            self.width_input,
+            self.height_input,
+            self.declared_weight_input,
             self.notes_input,
         ):
             field.setEnabled(not busy)
         self.create_button.setEnabled(not busy)
         self.create_button.setText("Creating…" if busy else "Create shipment")
+
+    def show_error(self, message: str) -> None:
+        self.status.show_message(message)
+        self.set_busy(False)
+
+
+class ControlWeightDialog(QDialog):
+    record_requested = Signal(int, object)
+
+    def __init__(self, shipment: ShipmentDTO, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Control weight")
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(26, 24, 26, 22)
+        title = QLabel(f"Control weight — {shipment.shipment_number}")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        form = QFormLayout()
+        declared = (
+            f"{Decimal(shipment.declared_weight_g) / 1000} kg"
+            if shipment.declared_weight_g is not None
+            else "Not declared"
+        )
+        form.addRow("Declared weight", QLabel(declared))
+        self.measured_input = _line("shipmentMeasuredWeightKg")
+        self.measured_input.setPlaceholderText("kg")
+        self.note_input = QPlainTextEdit()
+        self.note_input.setObjectName("shipmentWeightNote")
+        self.note_input.setMaximumHeight(90)
+        form.addRow("Measured weight (kg) *", self.measured_input)
+        form.addRow("Note", self.note_input)
+        layout.addLayout(form)
+        self.status = StatusBanner()
+        layout.addWidget(self.status)
+        self.record_button = QPushButton("Record weight")
+        self.record_button.setObjectName("recordShipmentWeightAction")
+        self.record_button.clicked.connect(self._submit)
+        layout.addLayout(_dialog_actions(self, self.record_button))
+
+    def _submit(self) -> None:
+        try:
+            grams = _kilograms_to_grams(self.measured_input.text(), "Measured weight")
+        except ValueError as error:
+            self.status.show_message(str(error))
+            return
+        if grams is None:
+            self.status.show_message("Measured weight is required.")
+            return
+        note = self.note_input.toPlainText()
+        self.status.clear()
+        self.record_requested.emit(grams, note if note.strip() else None)
+
+    def set_busy(self, busy: bool) -> None:
+        self.measured_input.setEnabled(not busy)
+        self.note_input.setEnabled(not busy)
+        self.record_button.setEnabled(not busy)
+        self.record_button.setText("Recording…" if busy else "Record weight")
 
     def show_error(self, message: str) -> None:
         self.status.show_message(message)
@@ -447,6 +584,7 @@ class ShipmentDetailsData:
     shipment: ShipmentDTO
     history: tuple[ShipmentStatusHistoryDTO, ...]
     problem: ShipmentProblemDTO | None
+    weight_checks: tuple[ShipmentWeightCheckDTO, ...] = ()
 
 
 class ShipmentDetailsDialog(QDialog):
@@ -471,6 +609,10 @@ class ShipmentDetailsDialog(QDialog):
         tabs.addTab(self._details_tab(shipment, timezone_name), "Details")
         tabs.addTab(self._history_tab(details.history, timezone_name), "History")
         tabs.addTab(self._problem_tab(details.problem, timezone_name), "Problem")
+        tabs.addTab(
+            self._weight_history_tab(details.weight_checks, timezone_name),
+            "Weight history",
+        )
         layout.addWidget(tabs, 1)
         close_button = QPushButton("Close")
         close_button.setProperty("secondary", True)
@@ -488,6 +630,17 @@ class ShipmentDetailsDialog(QDialog):
             ("Shipment number", shipment.shipment_number),
             ("Status", display_enum(shipment.status.value)),
             ("Sender", shipment.sender_name),
+            ("Contract client ID", str(shipment.sender_client_id or "—")),
+            ("Packages", str(shipment.package_count)),
+            ("Length", f"{shipment.length_cm} cm" if shipment.length_cm else "—"),
+            ("Width", f"{shipment.width_cm} cm" if shipment.width_cm else "—"),
+            ("Height", f"{shipment.height_cm} cm" if shipment.height_cm else "—"),
+            (
+                "Declared weight",
+                f"{Decimal(shipment.declared_weight_g) / 1000} kg"
+                if shipment.declared_weight_g is not None
+                else "—",
+            ),
             ("Recipient", shipment.recipient_name),
             ("Phone", shipment.recipient_phone),
             ("Address", shipment.recipient_address),
@@ -553,4 +706,44 @@ class ShipmentDetailsDialog(QDialog):
             text = QLabel(value)
             text.setWordWrap(True)
             form.addRow(label, text)
+        return tab
+
+    @staticmethod
+    def _weight_history_tab(
+        checks: tuple[ShipmentWeightCheckDTO, ...], timezone_name: str
+    ) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        table = QTableWidget(len(checks), 8)
+        table.setObjectName("shipmentWeightHistoryTable")
+        table.setHorizontalHeaderLabels(
+            (
+                "Checked at",
+                "Declared (kg)",
+                "Measured (kg)",
+                "Difference (g)",
+                "Tolerance (g)",
+                "Result",
+                "Checked by",
+                "Note",
+            )
+        )
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        for row, check in enumerate(checks):
+            values = (
+                display_timestamp(check.checked_at, timezone_name),
+                str(Decimal(check.declared_weight_g_snapshot) / 1000),
+                str(Decimal(check.measured_weight_g) / 1000),
+                str(check.absolute_difference_g),
+                str(check.tolerance_abs_g_snapshot),
+                display_enum(check.result.value),
+                str(check.checked_by_user_id),
+                check.note or "—",
+            )
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(value))
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(table)
         return tab

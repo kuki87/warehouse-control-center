@@ -25,18 +25,20 @@ from PySide6.QtWidgets import (
 )
 
 from warehouse_control_center.application.dto import (
+    ClientDTO,
     SessionContext,
     ShipmentDTO,
     ShipmentPage,
     ShipmentProblemDTO,
 )
 from warehouse_control_center.application.permissions import has_permission
-from warehouse_control_center.application.services import ShipmentService
+from warehouse_control_center.application.services import ClientService, ShipmentService
 from warehouse_control_center.domain.enums import Permission, ProblemType, ShipmentStatus
 from warehouse_control_center.domain.shipment_workflow import can_transition
 from warehouse_control_center.presentation.qt.dialogs.confirm_dialog import ConfirmDialog
 from warehouse_control_center.presentation.qt.dialogs.shipment_dialogs import (
     ChangeStatusDialog,
+    ControlWeightDialog,
     EditShipmentDialog,
     NewShipmentDialog,
     ReportProblemDialog,
@@ -67,6 +69,8 @@ class ShipmentsPage(QWidget):
         "City",
         "Phone",
         "Status",
+        "Packages",
+        "Declared Weight",
         "Courier",
         "Problem",
         "Archived",
@@ -90,11 +94,14 @@ class ShipmentsPage(QWidget):
         logger: logging.Logger,
         timezone_name: str,
         parent: QWidget | None = None,
+        *,
+        clients: ClientService | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("shipments_page")
         self._session = session
         self._shipments = shipments
+        self._clients = clients
         self._logger = logger
         self._timezone_name = timezone_name
         self._tasks = DatabaseTaskRunner(thread_pool, self)
@@ -112,6 +119,7 @@ class ShipmentsPage(QWidget):
         self._resolve_dialog: ResolveProblemDialog | None = None
         self._details_dialog: ShipmentDetailsDialog | None = None
         self._confirm_dialog: ConfirmDialog | None = None
+        self._control_weight_dialog: ControlWeightDialog | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -181,6 +189,9 @@ class ShipmentsPage(QWidget):
         self.resolve_problem_button = self._button(
             "Resolve Problem", "resolveShipmentProblem", self.open_resolve_problem
         )
+        self.control_weight_button = self._button(
+            "Control Weight", "controlShipmentWeight", self.open_control_weight
+        )
         self.archive_button = self._button(
             "Archive", "archiveShipment", self.archive, secondary=True, danger=True
         )
@@ -190,6 +201,7 @@ class ShipmentsPage(QWidget):
             (self.change_status_button, Permission.CHANGE_SHIPMENT_STATUS),
             (self.report_problem_button, Permission.MARK_PROBLEM),
             (self.resolve_problem_button, Permission.RESOLVE_PROBLEM),
+            (self.control_weight_button, Permission.CONTROL_WEIGHT_SHIPMENT),
             (self.archive_button, Permission.ARCHIVE_SHIPMENT),
             (self.restore_button, Permission.RESTORE_SHIPMENT),
         )
@@ -367,6 +379,12 @@ class ShipmentsPage(QWidget):
                 record.recipient_city,
                 record.recipient_phone,
                 display_enum(record.status.value),
+                str(record.package_count),
+                (
+                    f"{record.declared_weight_g / 1000:g} kg"
+                    if record.declared_weight_g is not None
+                    else "—"
+                ),
                 str(record.courier_id) if record.courier_id else "Unassigned",
                 "Yes" if record.status is ShipmentStatus.PROBLEM else "No",
                 "Yes" if record.archived_at is not None else "No",
@@ -418,23 +436,45 @@ class ShipmentsPage(QWidget):
         return self._records.get(shipment_id) if isinstance(shipment_id, int) else None
 
     def open_new(self) -> None:
-        dialog = NewShipmentDialog(self)
+        if self._clients is None:
+            self._show_new_dialog(())
+            return
+        if self._mutation_busy:
+            return
+        clients_service = self._clients
+        self._mutation_busy = True
+        self._update_busy_state()
+        self._tasks.submit(
+            lambda: clients_service.list_clients(self._session, active_only=True),
+            on_result=lambda result: self._show_new_dialog(cast(tuple[ClientDTO, ...], result)),
+            on_error=lambda error: self._handle_error(error, "load contract clients"),
+            on_finished=self._mutation_finished,
+        )
+
+    def _show_new_dialog(self, clients: tuple[ClientDTO, ...]) -> None:
+        dialog = NewShipmentDialog(clients, self)
         self._new_dialog = dialog
         dialog.create_requested.connect(lambda values: self._create(dialog, values))
         dialog.open()
 
     def _create(self, dialog: NewShipmentDialog, values: object) -> None:
-        fields = cast(dict[str, str | None], values)
+        fields = cast(dict[str, object], values)
         dialog.set_busy(True)
         self._mutate(
             lambda: self._shipments.create_shipment(
                 self._session,
                 sender_name=cast(str, fields["sender_name"]),
+                sender_client_id=cast(int | None, fields["sender_client_id"]),
                 recipient_name=cast(str, fields["recipient_name"]),
                 recipient_phone=cast(str, fields["recipient_phone"]),
                 recipient_address=cast(str, fields["recipient_address"]),
                 recipient_city=cast(str, fields["recipient_city"]),
-                notes=fields["notes"],
+                package_count=cast(int, fields["package_count"]),
+                length_cm=cast(str | None, fields["length_cm"]),
+                width_cm=cast(str | None, fields["width_cm"]),
+                height_cm=cast(str | None, fields["height_cm"]),
+                declared_weight_g=cast(int | None, fields["declared_weight_g"]),
+                notes=cast(str | None, fields["notes"]),
             ),
             "create shipment",
             lambda result: (
@@ -484,7 +524,8 @@ class ShipmentsPage(QWidget):
             current = self._shipments.get_shipment(self._session, shipment.id)
             history = self._shipments.get_status_history(self._session, shipment.id)
             problem = self._shipments.get_open_problem(self._session, shipment.id)
-            return ShipmentDetailsData(current, history, problem)
+            weight_checks = self._shipments.get_weight_checks(self._session, shipment.id)
+            return ShipmentDetailsData(current, history, problem, weight_checks)
 
         self._tasks.submit(
             load,
@@ -497,6 +538,37 @@ class ShipmentsPage(QWidget):
         dialog = ShipmentDetailsDialog(cast(ShipmentDetailsData, result), self._timezone_name, self)
         self._details_dialog = dialog
         dialog.open()
+
+    def open_control_weight(self) -> None:
+        shipment = self.selected_shipment()
+        if shipment is None:
+            return
+        dialog = ControlWeightDialog(shipment, self)
+        self._control_weight_dialog = dialog
+        dialog.record_requested.connect(
+            lambda measured, note: self._record_control_weight(dialog, shipment, measured, note)
+        )
+        dialog.open()
+
+    def _record_control_weight(
+        self,
+        dialog: ControlWeightDialog,
+        shipment: ShipmentDTO,
+        measured_weight_g: int,
+        note: object,
+    ) -> None:
+        dialog.set_busy(True)
+        self._mutate(
+            lambda: self._shipments.record_control_weight(
+                self._session,
+                shipment.id,
+                measured_weight_g=measured_weight_g,
+                note=cast(str | None, note),
+            ),
+            "record shipment control weight",
+            "Control weight recorded successfully.",
+            dialog,
+        )
 
     def open_change_status(self) -> None:
         shipment = self.selected_shipment()
@@ -668,6 +740,7 @@ class ShipmentsPage(QWidget):
         | ChangeStatusDialog
         | ReportProblemDialog
         | ResolveProblemDialog
+        | ControlWeightDialog
         | None = None,
     ) -> None:
         if self._mutation_busy:
@@ -691,6 +764,7 @@ class ShipmentsPage(QWidget):
         | ChangeStatusDialog
         | ReportProblemDialog
         | ResolveProblemDialog
+        | ControlWeightDialog
         | None,
     ) -> None:
         if dialog is not None:
@@ -707,6 +781,7 @@ class ShipmentsPage(QWidget):
         | ChangeStatusDialog
         | ReportProblemDialog
         | ResolveProblemDialog
+        | ControlWeightDialog
         | None,
     ) -> None:
         presentation = translate_error(error)
@@ -758,6 +833,7 @@ class ShipmentsPage(QWidget):
             self.change_status_button,
             self.report_problem_button,
             self.resolve_problem_button,
+            self.control_weight_button,
             self.archive_button,
             self.restore_button,
         )
@@ -785,5 +861,8 @@ class ShipmentsPage(QWidget):
             operational and can_transition(shipment.status, ShipmentStatus.PROBLEM)
         )
         self.resolve_problem_button.setEnabled(operational and problem)
+        self.control_weight_button.setEnabled(
+            operational and shipment.declared_weight_g is not None
+        )
         self.archive_button.setEnabled(operational)
         self.restore_button.setEnabled(not operational)

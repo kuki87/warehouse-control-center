@@ -2,18 +2,26 @@
 
 from warehouse_control_center.domain.entities import (
     AuditEvent,
+    Client,
     Courier,
     Shipment,
     ShipmentProblem,
     ShipmentStatusHistory,
+    ShipmentWeightCheck,
     User,
+)
+from warehouse_control_center.domain.measurements import (
+    dimension_cm_to_mm,
+    dimension_mm_to_cm,
 )
 from warehouse_control_center.infrastructure.database.models import (
     AuditEventModel,
+    ClientModel,
     CourierModel,
     ShipmentModel,
     ShipmentProblemModel,
     ShipmentStatusHistoryModel,
+    ShipmentWeightCheckModel,
     UserModel,
 )
 
@@ -82,6 +90,50 @@ def courier_to_entity(model: CourierModel) -> Courier:
     )
 
 
+def client_to_model(client: Client) -> ClientModel:
+    return ClientModel(
+        id=client.id,
+        client_code=client.client_code,
+        client_code_normalized=client.client_code_normalized,
+        company_name=client.company_name,
+        tax_id=client.tax_id,
+        address=client.address,
+        city=client.city,
+        contact_name=client.contact_name,
+        phone=client.phone,
+        email=client.email,
+        contract_number=client.contract_number,
+        contract_start=client.contract_start,
+        contract_end=client.contract_end,
+        active=client.active,
+        notes=client.notes,
+        created_at=client.created_at,
+        updated_at=client.updated_at,
+    )
+
+
+def client_to_entity(model: ClientModel) -> Client:
+    return Client(
+        id=model.id,
+        client_code=model.client_code,
+        client_code_normalized=model.client_code_normalized,
+        company_name=model.company_name,
+        tax_id=model.tax_id,
+        address=model.address,
+        city=model.city,
+        contact_name=model.contact_name,
+        phone=model.phone,
+        email=model.email,
+        contract_number=model.contract_number,
+        contract_start=model.contract_start,
+        contract_end=model.contract_end,
+        active=model.active,
+        notes=model.notes,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
 def shipment_to_model(shipment: Shipment) -> ShipmentModel:
     return ShipmentModel(
         id=shipment.id,
@@ -92,6 +144,12 @@ def shipment_to_model(shipment: Shipment) -> ShipmentModel:
         recipient_city=shipment.recipient_city,
         recipient_phone=shipment.recipient_phone,
         sender_name=shipment.sender_name,
+        sender_client_id=shipment.sender_client_id,
+        package_count=shipment.package_count,
+        length_mm=dimension_cm_to_mm(shipment.length_cm),
+        width_mm=dimension_cm_to_mm(shipment.width_cm),
+        height_mm=dimension_cm_to_mm(shipment.height_cm),
+        declared_weight_g=shipment.declared_weight_g,
         courier_id=shipment.courier_id,
         status=shipment.status,
         received_at=shipment.received_at,
@@ -171,6 +229,12 @@ def shipment_to_entity(model: ShipmentModel) -> Shipment:
         recipient_city=model.recipient_city,
         recipient_phone=model.recipient_phone,
         sender_name=model.sender_name,
+        sender_client_id=model.sender_client_id,
+        package_count=model.package_count,
+        length_cm=dimension_mm_to_cm(model.length_mm),
+        width_cm=dimension_mm_to_cm(model.width_mm),
+        height_cm=dimension_mm_to_cm(model.height_mm),
+        declared_weight_g=model.declared_weight_g,
         courier_id=model.courier_id,
         status=model.status,
         received_at=model.received_at,
@@ -183,6 +247,40 @@ def shipment_to_entity(model: ShipmentModel) -> Shipment:
         notes=model.notes,
         archived_at=model.archived_at,
         version=model.version,
+    )
+
+
+def weight_check_to_model(check: ShipmentWeightCheck) -> ShipmentWeightCheckModel:
+    return ShipmentWeightCheckModel(
+        id=check.id,
+        shipment_id=check.shipment_id,
+        declared_weight_g_snapshot=check.declared_weight_g_snapshot,
+        measured_weight_g=check.measured_weight_g,
+        absolute_difference_g=check.absolute_difference_g,
+        difference_percent=check.difference_percent,
+        tolerance_abs_g_snapshot=check.tolerance_abs_g_snapshot,
+        tolerance_percent_snapshot=check.tolerance_percent_snapshot,
+        result=check.result,
+        checked_by_user_id=check.checked_by_user_id,
+        checked_at=check.checked_at,
+        note=check.note,
+    )
+
+
+def weight_check_to_entity(model: ShipmentWeightCheckModel) -> ShipmentWeightCheck:
+    return ShipmentWeightCheck(
+        id=model.id,
+        shipment_id=model.shipment_id,
+        declared_weight_g_snapshot=model.declared_weight_g_snapshot,
+        measured_weight_g=model.measured_weight_g,
+        absolute_difference_g=model.absolute_difference_g,
+        difference_percent=model.difference_percent,
+        tolerance_abs_g_snapshot=model.tolerance_abs_g_snapshot,
+        tolerance_percent_snapshot=model.tolerance_percent_snapshot,
+        result=model.result,
+        checked_by_user_id=model.checked_by_user_id,
+        checked_at=model.checked_at,
+        note=model.note,
     )
 
 

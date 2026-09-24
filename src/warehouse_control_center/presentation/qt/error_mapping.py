@@ -5,9 +5,12 @@ from dataclasses import dataclass
 
 from warehouse_control_center.domain.exceptions import (
     AuthenticationError,
+    ClientNotFoundError,
     DatabaseBusyError,
+    DuplicateClientCodeError,
     DuplicateShipmentNumberError,
     DuplicateUserError,
+    InvalidClientStateError,
     InvalidCurrentPasswordError,
     InvalidShipmentTransitionError,
     InvalidUserStateError,
@@ -47,6 +50,8 @@ def translate_error(error: BaseException) -> UIError:
         return UIError("Invalid username or password.")
     if isinstance(error, DuplicateUserError):
         return UIError("That username is already reserved.")
+    if isinstance(error, DuplicateClientCodeError):
+        return UIError("That client code is already reserved.")
     if isinstance(error, DuplicateShipmentNumberError):
         return UIError("That shipment number is already reserved.")
     if isinstance(error, ShipmentConflictError):
@@ -76,7 +81,16 @@ def translate_error(error: BaseException) -> UIError:
                 session_invalid=True,
             )
         return UIError("You do not have permission to perform this action.")
-    if isinstance(error, (ValidationError, InvalidUserStateError, UserNotFoundError)):
+    if isinstance(
+        error,
+        (
+            ValidationError,
+            InvalidUserStateError,
+            InvalidClientStateError,
+            UserNotFoundError,
+            ClientNotFoundError,
+        ),
+    ):
         return UIError(str(error))
     return UIError("An unexpected error occurred.", unexpected=True)
 

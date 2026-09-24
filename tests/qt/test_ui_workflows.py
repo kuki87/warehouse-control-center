@@ -202,6 +202,7 @@ class FakeResources:
     initial_administrator: TemporaryCredential | None = None
     shutdown_called: bool = False
     shipments: object | None = None
+    clients: object | None = None
     settings: FakeSettings = field(default_factory=FakeSettings)
 
     def shutdown(self) -> None:

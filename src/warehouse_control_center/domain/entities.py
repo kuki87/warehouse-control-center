@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
-from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
+from warehouse_control_center.domain.client_validation import validate_client_fields
+from warehouse_control_center.domain.enums import (
+    ProblemType,
+    ShipmentStatus,
+    UserRole,
+    WeightCheckResult,
+)
+from warehouse_control_center.domain.measurements import (
+    validate_dimension_cm,
+    validate_package_count,
+    validate_weight_g,
+)
 from warehouse_control_center.domain.normalization import (
+    normalize_client_code,
     normalize_courier_code,
     normalize_shipment_number,
     normalize_username,
@@ -66,6 +79,46 @@ class Courier:
 
 
 @dataclass(slots=True)
+class Client:
+    client_code: str
+    company_name: str
+    address: str
+    city: str
+    client_code_normalized: str = ""
+    tax_id: str | None = None
+    contact_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    contract_number: str | None = None
+    contract_start: date | None = None
+    contract_end: date | None = None
+    active: bool = True
+    notes: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        validated = validate_client_fields(
+            client_code=self.client_code,
+            company_name=self.company_name,
+            tax_id=self.tax_id,
+            address=self.address,
+            city=self.city,
+            contact_name=self.contact_name,
+            phone=self.phone,
+            email=self.email,
+            contract_number=self.contract_number,
+            contract_start=self.contract_start,
+            contract_end=self.contract_end,
+            notes=self.notes,
+        )
+        for name in validated.__dataclass_fields__:
+            setattr(self, name, getattr(validated, name))
+        self.client_code_normalized = normalize_client_code(self.client_code)
+
+
+@dataclass(slots=True)
 class Shipment:
     shipment_number: str
     recipient_name: str
@@ -75,6 +128,12 @@ class Shipment:
     sender_name: str
     created_by: int
     shipment_number_normalized: str = ""
+    sender_client_id: int | None = None
+    package_count: int = 1
+    length_cm: Decimal | None = None
+    width_cm: Decimal | None = None
+    height_cm: Decimal | None = None
+    declared_weight_g: int | None = None
     courier_id: int | None = None
     status: ShipmentStatus = ShipmentStatus.RECEIVED
     received_at: datetime = field(default_factory=utc_now)
@@ -105,6 +164,13 @@ class Shipment:
         self.recipient_phone = validated.recipient_phone
         self.sender_name = validated.sender_name
         self.notes = validated.notes
+        self.package_count = validate_package_count(self.package_count)
+        self.length_cm = validate_dimension_cm("Length", self.length_cm)
+        self.width_cm = validate_dimension_cm("Width", self.width_cm)
+        self.height_cm = validate_dimension_cm("Height", self.height_cm)
+        self.declared_weight_g = validate_weight_g(
+            "Declared weight", self.declared_weight_g, required=False
+        )
         if not isinstance(self.status, ShipmentStatus):
             raise ValueError("Unsupported shipment status")
         if self.version < 1:
@@ -134,6 +200,22 @@ class ShipmentProblem:
     description: str | None = None
     resolved_by: int | None = None
     resolved_at: datetime | None = None
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class ShipmentWeightCheck:
+    shipment_id: int
+    declared_weight_g_snapshot: int
+    measured_weight_g: int
+    absolute_difference_g: int
+    tolerance_abs_g_snapshot: int
+    result: WeightCheckResult
+    checked_by_user_id: int
+    checked_at: datetime = field(default_factory=utc_now)
+    difference_percent: Decimal | None = None
+    tolerance_percent_snapshot: Decimal | None = None
+    note: str | None = None
     id: int | None = None
 
 

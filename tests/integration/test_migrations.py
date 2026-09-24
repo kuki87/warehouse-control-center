@@ -18,10 +18,12 @@ EXPECTED_TABLES = {
     "alembic_version",
     "users",
     "couriers",
+    "clients",
     "shipments",
     "shipment_number_sequences",
     "shipment_problems",
     "shipment_status_history",
+    "shipment_weight_checks",
     "audit_events",
 }
 
@@ -878,3 +880,113 @@ def test_exact_identifier_lookups_use_unique_indexes(engine: Engine) -> None:
             ).all()
             plan = " ".join(str(value) for row in rows for value in row).upper()
             assert "USING" in plan and "INDEX" in plan, (label, plan)
+
+
+def test_phase4a_upgrade_preserves_populated_0006_shipments(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0006_unify_shipment_identifier")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, recipient_name, "
+                    "recipient_address, recipient_city, recipient_phone, sender_name, status, "
+                    "received_at, created_by, archived_at, version) "
+                    "VALUES ('E000000321', 'E000000321', 'Name', 'Address', 'City', '123', "
+                    "'Legacy sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, "
+                    "'2026-01-02 03:04:05', 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT tracking_number, sender_name, sender_client_id, package_count, "
+                    "length_mm, width_mm, height_mm, declared_weight_g, archived_at "
+                    "FROM shipments"
+                )
+            ).one()
+            assert row == (
+                "E000000321",
+                "Legacy sender",
+                None,
+                1,
+                None,
+                None,
+                None,
+                None,
+                "2026-01-02 03:04:05",
+            )
+            assert connection.scalar(text("SELECT COUNT(*) FROM clients")) == 0
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipment_weight_checks")) == 0
+    finally:
+        engine.dispose()
+
+
+def test_phase4a_downgrade_and_reupgrade_preserve_legacy_shipment(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0006_unify_shipment_identifier")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, recipient_name, "
+                    "recipient_address, recipient_city, recipient_phone, sender_name, status, "
+                    "received_at, created_by, version) "
+                    "VALUES ('E000000654', 'E000000654', 'Name', 'Address', 'City', '123', "
+                    "'Legacy sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "head")
+        command.downgrade(config, "0006_unify_shipment_identifier")
+        command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT tracking_number, sender_name, package_count FROM shipments")
+            ).one() == ("E000000654", "Legacy sender", 1)
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                EXPECTED_SCHEMA_REVISION
+            )
+    finally:
+        engine.dispose()

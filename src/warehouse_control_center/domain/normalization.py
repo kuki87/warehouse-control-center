@@ -15,6 +15,10 @@ def normalize_courier_code(value: str) -> str:
     return _compact_identifier(value).casefold()
 
 
+def normalize_client_code(value: str) -> str:
+    return _compact_identifier(value).casefold()
+
+
 def _normalized_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip()
 

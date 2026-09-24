@@ -15,6 +15,8 @@ _OPERATOR_PERMISSIONS = frozenset(
         Permission.ASSIGN_SHIPMENT,
         Permission.MARK_PROBLEM,
         Permission.VIEW_COURIERS,
+        Permission.VIEW_CLIENTS,
+        Permission.CONTROL_WEIGHT_SHIPMENT,
     }
 )
 
@@ -36,6 +38,9 @@ _ADMIN_PERMISSIONS = frozenset(
         Permission.IMPORT_SHIPMENTS,
         Permission.VIEW_COURIERS,
         Permission.MANAGE_COURIERS,
+        Permission.VIEW_CLIENTS,
+        Permission.MANAGE_CLIENTS,
+        Permission.CONTROL_WEIGHT_SHIPMENT,
         Permission.VIEW_AUDIT_LOG,
         Permission.MANAGE_USERS,
         Permission.MANAGE_SETTINGS,

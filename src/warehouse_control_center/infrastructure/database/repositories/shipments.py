@@ -11,6 +11,7 @@ from warehouse_control_center.domain.entities import (
     Shipment,
     ShipmentProblem,
     ShipmentStatusHistory,
+    ShipmentWeightCheck,
 )
 from warehouse_control_center.domain.exceptions import (
     DatabaseBusyError,
@@ -19,11 +20,13 @@ from warehouse_control_center.domain.exceptions import (
     ShipmentConflictError,
     ShipmentProblemOpenError,
 )
+from warehouse_control_center.domain.measurements import dimension_cm_to_mm
 from warehouse_control_center.domain.normalization import normalize_shipment_number
 from warehouse_control_center.infrastructure.database.models import (
     ShipmentModel,
     ShipmentProblemModel,
     ShipmentStatusHistoryModel,
+    ShipmentWeightCheckModel,
 )
 from warehouse_control_center.infrastructure.database.repositories.mapping import (
     history_to_entity,
@@ -32,6 +35,8 @@ from warehouse_control_center.infrastructure.database.repositories.mapping impor
     problem_to_model,
     shipment_to_entity,
     shipment_to_model,
+    weight_check_to_entity,
+    weight_check_to_model,
 )
 
 _SORT_COLUMNS = {
@@ -67,6 +72,12 @@ class SqlAlchemyShipmentRepository:
         model.recipient_city = shipment.recipient_city
         model.recipient_phone = shipment.recipient_phone
         model.sender_name = shipment.sender_name
+        model.sender_client_id = shipment.sender_client_id
+        model.package_count = shipment.package_count
+        model.length_mm = dimension_cm_to_mm(shipment.length_cm)
+        model.width_mm = dimension_cm_to_mm(shipment.width_cm)
+        model.height_mm = dimension_cm_to_mm(shipment.height_cm)
+        model.declared_weight_g = shipment.declared_weight_g
         model.status = shipment.status
         model.received_at = shipment.received_at
         model.sorted_at = shipment.sorted_at
@@ -190,6 +201,20 @@ class SqlAlchemyShipmentRepository:
         )
         model = self._session.scalar(statement)
         return problem_to_entity(model) if model is not None else None
+
+    def add_weight_check(self, check: ShipmentWeightCheck) -> ShipmentWeightCheck:
+        model = weight_check_to_model(check)
+        self._session.add(model)
+        self._flush()
+        return weight_check_to_entity(model)
+
+    def list_weight_checks(self, shipment_id: int) -> list[ShipmentWeightCheck]:
+        statement = (
+            select(ShipmentWeightCheckModel)
+            .where(ShipmentWeightCheckModel.shipment_id == shipment_id)
+            .order_by(ShipmentWeightCheckModel.checked_at, ShipmentWeightCheckModel.id)
+        )
+        return [weight_check_to_entity(model) for model in self._session.scalars(statement)]
 
     def _flush_identifiers(self) -> None:
         try:

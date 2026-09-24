@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import cast
 
 from warehouse_control_center.application.dto import (
@@ -12,8 +13,8 @@ from warehouse_control_center.application.dto import (
     ShipmentProblemDTO,
     ShipmentStatusChangeResult,
     ShipmentStatusHistoryDTO,
+    ShipmentWeightCheckDTO,
 )
-from warehouse_control_center.application.permissions import has_permission, require_permission
 from warehouse_control_center.application.ports.clock import Clock
 from warehouse_control_center.application.ports.repositories import (
     ShipmentListQuery,
@@ -21,6 +22,7 @@ from warehouse_control_center.application.ports.repositories import (
     SortDirection,
 )
 from warehouse_control_center.application.ports.unit_of_work import UnitOfWork, UnitOfWorkFactory
+from warehouse_control_center.application.services._actor import require_current_actor
 from warehouse_control_center.application.services._audit import make_audit_event
 from warehouse_control_center.application.services._time import utc_timestamp
 from warehouse_control_center.domain.entities import (
@@ -28,6 +30,7 @@ from warehouse_control_center.domain.entities import (
     Shipment,
     ShipmentProblem,
     ShipmentStatusHistory,
+    ShipmentWeightCheck,
     User,
 )
 from warehouse_control_center.domain.enums import (
@@ -37,19 +40,24 @@ from warehouse_control_center.domain.enums import (
     ShipmentStatus,
 )
 from warehouse_control_center.domain.exceptions import (
+    ClientNotFoundError,
     DuplicateShipmentNumberError,
-    InvalidPasswordError,
+    InvalidClientStateError,
     InvalidShipmentError,
     InvalidShipmentQueryError,
     InvalidShipmentTransitionError,
-    InvalidUserRoleError,
-    PermissionDeniedError,
     ShipmentArchivedError,
     ShipmentConflictError,
     ShipmentNotFoundError,
     ShipmentNumberAllocationError,
     ShipmentProblemNotFoundError,
     ShipmentProblemOpenError,
+)
+from warehouse_control_center.domain.measurements import (
+    WeightTolerancePolicy,
+    validate_dimension_cm,
+    validate_package_count,
+    validate_weight_g,
 )
 from warehouse_control_center.domain.shipment_validation import (
     validate_optional_city,
@@ -58,6 +66,7 @@ from warehouse_control_center.domain.shipment_validation import (
     validate_shipment_fields,
     validate_shipment_metadata,
     validate_status_reason,
+    validate_weight_check_note,
 )
 from warehouse_control_center.domain.shipment_workflow import (
     can_transition,
@@ -83,9 +92,15 @@ _SORT_DIRECTIONS = frozenset({"asc", "desc"})
 class ShipmentService:
     """Shipment use cases; creation intentionally starts history at the first transition."""
 
-    def __init__(self, uow_factory: UnitOfWorkFactory, clock: Clock) -> None:
+    def __init__(
+        self,
+        uow_factory: UnitOfWorkFactory,
+        clock: Clock,
+        weight_policy: WeightTolerancePolicy | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
+        self._weight_policy = weight_policy or WeightTolerancePolicy()
 
     def create_shipment(
         self,
@@ -95,19 +110,46 @@ class ShipmentService:
         recipient_address: str,
         recipient_city: str,
         recipient_phone: str,
-        sender_name: str,
+        sender_name: str | None,
+        sender_client_id: int | None = None,
+        package_count: int = 1,
+        length_cm: Decimal | str | int | None = None,
+        width_cm: Decimal | str | int | None = None,
+        height_cm: Decimal | str | int | None = None,
+        declared_weight_g: int | None = None,
         notes: str | None = None,
     ) -> ShipmentDTO:
-        fields = validate_shipment_metadata(
-            recipient_name=recipient_name,
-            recipient_address=recipient_address,
-            recipient_city=recipient_city,
-            recipient_phone=recipient_phone,
-            sender_name=sender_name,
-            notes=notes,
-        )
+        validated_package_count = validate_package_count(package_count)
+        validated_length = validate_dimension_cm("Length", length_cm)
+        validated_width = validate_dimension_cm("Width", width_cm)
+        validated_height = validate_dimension_cm("Height", height_cm)
+        validated_weight = validate_weight_g("Declared weight", declared_weight_g, required=False)
+        if sender_client_id is not None and (
+            isinstance(sender_client_id, bool)
+            or not isinstance(sender_client_id, int)
+            or sender_client_id < 1
+        ):
+            raise InvalidShipmentError("Sender client id must be a positive integer")
         with self._uow_factory() as uow:
-            actor = _require_current_actor(uow, session, Permission.CREATE_SHIPMENT)
+            actor = require_current_actor(uow, session, Permission.CREATE_SHIPMENT)
+            resolved_sender = sender_name
+            if sender_client_id is not None:
+                client = uow.clients.get_by_id(sender_client_id)
+                if client is None:
+                    raise ClientNotFoundError(f"Client {sender_client_id} does not exist")
+                if not client.active:
+                    raise InvalidClientStateError(
+                        "Inactive clients cannot be used for new shipments"
+                    )
+                resolved_sender = client.company_name
+            fields = validate_shipment_metadata(
+                recipient_name=recipient_name,
+                recipient_address=recipient_address,
+                recipient_city=recipient_city,
+                recipient_phone=recipient_phone,
+                sender_name=resolved_sender,
+                notes=notes,
+            )
             shipment_number = uow.shipment_numbers.allocate()
             now = utc_timestamp(self._clock.now())
             try:
@@ -119,6 +161,12 @@ class ShipmentService:
                         recipient_city=fields.recipient_city,
                         recipient_phone=fields.recipient_phone,
                         sender_name=fields.sender_name,
+                        sender_client_id=sender_client_id,
+                        package_count=validated_package_count,
+                        length_cm=validated_length,
+                        width_cm=validated_width,
+                        height_cm=validated_height,
+                        declared_weight_g=validated_weight,
                         notes=fields.notes,
                         created_by=_persisted_id(actor),
                         status=ShipmentStatus.RECEIVED,
@@ -144,6 +192,65 @@ class ShipmentService:
             uow.commit()
         return ShipmentDTO.from_entity(shipment)
 
+    def record_control_weight(
+        self,
+        session: SessionContext,
+        shipment_id: int,
+        *,
+        measured_weight_g: int,
+        note: str | None = None,
+    ) -> ShipmentWeightCheckDTO:
+        measured = validate_weight_g("Measured weight", measured_weight_g, required=True)
+        assert measured is not None
+        canonical_note = validate_weight_check_note(note)
+        with self._uow_factory() as uow:
+            actor = require_current_actor(uow, session, Permission.CONTROL_WEIGHT_SHIPMENT)
+            shipment = _get_shipment(uow, shipment_id)
+            _require_operational(shipment)
+            if shipment.declared_weight_g is None:
+                raise InvalidShipmentError("A declared weight is required before control weighing")
+            difference, result = self._weight_policy.evaluate(shipment.declared_weight_g, measured)
+            now = utc_timestamp(self._clock.now())
+            check = uow.shipments.add_weight_check(
+                ShipmentWeightCheck(
+                    shipment_id=shipment_id,
+                    declared_weight_g_snapshot=shipment.declared_weight_g,
+                    measured_weight_g=measured,
+                    absolute_difference_g=difference,
+                    tolerance_abs_g_snapshot=self._weight_policy.absolute_tolerance_g,
+                    result=result,
+                    checked_by_user_id=_persisted_id(actor),
+                    checked_at=now,
+                    note=canonical_note,
+                )
+            )
+            uow.audits.add(
+                _shipment_audit(
+                    AuditAction.SHIPMENT_WEIGHT_CHECKED,
+                    actor,
+                    shipment,
+                    now,
+                    details={
+                        "shipment_number": shipment.shipment_number,
+                        "measured_weight_g": measured,
+                        "result": result.value,
+                    },
+                )
+            )
+            uow.commit()
+        return ShipmentWeightCheckDTO.from_entity(check)
+
+    def get_weight_checks(
+        self, session: SessionContext, shipment_id: int
+    ) -> tuple[ShipmentWeightCheckDTO, ...]:
+        with self._uow_factory() as uow:
+            require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            _get_shipment(uow, shipment_id)
+            return tuple(
+                ShipmentWeightCheckDTO.from_entity(item)
+                for item in uow.shipments.list_weight_checks(shipment_id)
+            )
+
     def update_shipment(
         self,
         session: SessionContext,
@@ -159,7 +266,7 @@ class ShipmentService:
     ) -> ShipmentDTO:
         _require_version(expected_version)
         with self._uow_factory() as uow:
-            actor = _require_current_actor(uow, session, Permission.EDIT_SHIPMENT)
+            actor = require_current_actor(uow, session, Permission.EDIT_SHIPMENT)
             shipment = _get_shipment(uow, shipment_id)
             _require_operational(shipment)
             _require_expected_version(shipment, expected_version)
@@ -205,14 +312,14 @@ class ShipmentService:
 
     def get_shipment(self, session: SessionContext, shipment_id: int) -> ShipmentDTO:
         with self._uow_factory() as uow:
-            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
             return ShipmentDTO.from_entity(_get_shipment(uow, shipment_id))
 
     def get_by_shipment_number(self, session: SessionContext, shipment_number: str) -> ShipmentDTO:
         if not shipment_number or not shipment_number.strip():
             raise InvalidShipmentError("Shipment number is required")
         with self._uow_factory() as uow:
-            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
             shipment = uow.shipments.get_by_normalized_shipment_number(shipment_number)
             if shipment is None:
                 raise ShipmentNotFoundError("Shipment does not exist")
@@ -267,7 +374,7 @@ class ShipmentService:
             sort_direction=cast(SortDirection, sort_direction),
         )
         with self._uow_factory() as uow:
-            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
             shipments, total = uow.shipments.list_page(query)
         return ShipmentPage(
             tuple(ShipmentDTO.from_entity(shipment) for shipment in shipments),
@@ -280,7 +387,7 @@ class ShipmentService:
         self, session: SessionContext, shipment_id: int
     ) -> tuple[ShipmentStatusHistoryDTO, ...]:
         with self._uow_factory() as uow:
-            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
             _get_shipment(uow, shipment_id)
             return tuple(
                 ShipmentStatusHistoryDTO.from_entity(item)
@@ -292,7 +399,7 @@ class ShipmentService:
     ) -> ShipmentProblemDTO | None:
         """Return the unresolved problem without exposing repository entities to the UI."""
         with self._uow_factory() as uow:
-            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
+            require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
             _get_shipment(uow, shipment_id)
             problem = uow.shipments.get_open_problem(shipment_id)
             return ShipmentProblemDTO.from_entity(problem) if problem is not None else None
@@ -311,7 +418,7 @@ class ShipmentService:
         if not isinstance(target_status, ShipmentStatus):
             raise InvalidShipmentError("Unsupported shipment status")
         with self._uow_factory() as uow:
-            actor = _require_current_actor(uow, session, Permission.CHANGE_SHIPMENT_STATUS)
+            actor = require_current_actor(uow, session, Permission.CHANGE_SHIPMENT_STATUS)
             shipment = _get_shipment(uow, shipment_id)
             _require_operational(shipment)
             if shipment.status is target_status:
@@ -331,7 +438,7 @@ class ShipmentService:
             if not valid and not override:
                 require_transition(shipment.status, target_status)
             if is_override:
-                _require_actor_permission(actor, session, Permission.OVERRIDE_STATUS_TRANSITION)
+                require_current_actor(uow, session, Permission.OVERRIDE_STATUS_TRANSITION)
             now = utc_timestamp(self._clock.now())
             old_status = shipment.status
             _apply_status(shipment, target_status, now)
@@ -399,7 +506,7 @@ class ShipmentService:
         _require_version(expected_version)
         permission = Permission.ARCHIVE_SHIPMENT if archive else Permission.RESTORE_SHIPMENT
         with self._uow_factory() as uow:
-            actor = _require_current_actor(uow, session, permission)
+            actor = require_current_actor(uow, session, permission)
             shipment = _get_shipment(uow, shipment_id)
             _require_expected_version(shipment, expected_version)
             if archive and shipment.archived_at is not None:
@@ -435,7 +542,7 @@ class ShipmentService:
         _require_version(expected_version)
         validated_type, validated_description = validate_problem(problem_type, description)
         with self._uow_factory() as uow:
-            actor = _require_current_actor(uow, session, Permission.MARK_PROBLEM)
+            actor = require_current_actor(uow, session, Permission.MARK_PROBLEM)
             shipment = _get_shipment(uow, shipment_id)
             _require_operational(shipment)
             _require_expected_version(shipment, expected_version)
@@ -496,7 +603,7 @@ class ShipmentService:
         if recovery_status is not None and not isinstance(recovery_status, ShipmentStatus):
             raise InvalidShipmentError("Unsupported recovery status")
         with self._uow_factory() as uow:
-            actor = _require_current_actor(uow, session, Permission.RESOLVE_PROBLEM)
+            actor = require_current_actor(uow, session, Permission.RESOLVE_PROBLEM)
             shipment = _get_shipment(uow, shipment_id)
             _require_operational(shipment)
             _require_expected_version(shipment, expected_version)
@@ -538,46 +645,6 @@ class ShipmentService:
             )
             uow.commit()
         return ShipmentProblemDTO.from_entity(resolved)
-
-
-def _require_current_actor(
-    uow: UnitOfWork,
-    session: SessionContext,
-    permission: Permission,
-) -> User:
-    require_permission(session, permission)
-    try:
-        actor = uow.users.get_by_id(session.user_id)
-    except (InvalidPasswordError, InvalidUserRoleError):
-        raise PermissionDeniedError("Current session is no longer authorized") from None
-    if (
-        actor is None
-        or actor.id is None
-        or not actor.active
-        or actor.archived_at is not None
-        or actor.credential_version != session.credential_version
-        or actor.username != session.username
-    ):
-        raise PermissionDeniedError("Current session is no longer authorized")
-    _require_actor_permission(actor, session, permission)
-    return actor
-
-
-def _require_actor_permission(
-    actor: User,
-    session: SessionContext,
-    permission: Permission,
-) -> None:
-    current = SessionContext(
-        user_id=_persisted_id(actor),
-        username=actor.username,
-        role=actor.role,
-        authenticated_at=session.authenticated_at,
-        must_change_password=actor.must_change_password,
-        credential_version=actor.credential_version,
-    )
-    if not has_permission(current, permission):
-        raise PermissionDeniedError("Current session is no longer authorized")
 
 
 def _get_shipment(uow: UnitOfWork, shipment_id: int) -> Shipment:

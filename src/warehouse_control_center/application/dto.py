@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, NoReturn, Self
 
 from warehouse_control_center.domain.entities import (
+    Client,
     Shipment,
     ShipmentProblem,
     ShipmentStatusHistory,
+    ShipmentWeightCheck,
     User,
 )
-from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
+from warehouse_control_center.domain.enums import (
+    ProblemType,
+    ShipmentStatus,
+    UserRole,
+    WeightCheckResult,
+)
 from warehouse_control_center.domain.exceptions import TemporaryCredentialConsumedError
 
 
@@ -58,6 +66,49 @@ class UserDTO:
 
 
 @dataclass(frozen=True, slots=True)
+class ClientDTO:
+    id: int
+    client_code: str
+    company_name: str
+    tax_id: str | None
+    address: str
+    city: str
+    contact_name: str | None
+    phone: str | None
+    email: str | None
+    contract_number: str | None
+    contract_start: date | None
+    contract_end: date | None
+    active: bool
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_entity(cls, client: Client) -> ClientDTO:
+        if client.id is None:
+            raise ValueError("Persisted client must have an id")
+        return cls(
+            id=client.id,
+            client_code=client.client_code,
+            company_name=client.company_name,
+            tax_id=client.tax_id,
+            address=client.address,
+            city=client.city,
+            contact_name=client.contact_name,
+            phone=client.phone,
+            email=client.email,
+            contract_number=client.contract_number,
+            contract_start=client.contract_start,
+            contract_end=client.contract_end,
+            active=client.active,
+            notes=client.notes,
+            created_at=client.created_at,
+            updated_at=client.updated_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ShipmentDTO:
     id: int
     shipment_number: str
@@ -66,6 +117,12 @@ class ShipmentDTO:
     recipient_city: str
     recipient_phone: str
     sender_name: str
+    sender_client_id: int | None
+    package_count: int
+    length_cm: Decimal | None
+    width_cm: Decimal | None
+    height_cm: Decimal | None
+    declared_weight_g: int | None
     courier_id: int | None
     status: ShipmentStatus
     received_at: datetime
@@ -91,6 +148,12 @@ class ShipmentDTO:
             recipient_city=shipment.recipient_city,
             recipient_phone=shipment.recipient_phone,
             sender_name=shipment.sender_name,
+            sender_client_id=shipment.sender_client_id,
+            package_count=shipment.package_count,
+            length_cm=shipment.length_cm,
+            width_cm=shipment.width_cm,
+            height_cm=shipment.height_cm,
+            declared_weight_g=shipment.declared_weight_g,
             courier_id=shipment.courier_id,
             status=shipment.status,
             received_at=shipment.received_at,
@@ -159,6 +222,41 @@ class ShipmentProblemDTO:
             reported_at=problem.reported_at,
             resolved_by=problem.resolved_by,
             resolved_at=problem.resolved_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentWeightCheckDTO:
+    id: int
+    shipment_id: int
+    declared_weight_g_snapshot: int
+    measured_weight_g: int
+    absolute_difference_g: int
+    difference_percent: Decimal | None
+    tolerance_abs_g_snapshot: int
+    tolerance_percent_snapshot: Decimal | None
+    result: WeightCheckResult
+    checked_by_user_id: int
+    checked_at: datetime
+    note: str | None
+
+    @classmethod
+    def from_entity(cls, check: ShipmentWeightCheck) -> ShipmentWeightCheckDTO:
+        if check.id is None:
+            raise ValueError("Persisted weight check must have an id")
+        return cls(
+            id=check.id,
+            shipment_id=check.shipment_id,
+            declared_weight_g_snapshot=check.declared_weight_g_snapshot,
+            measured_weight_g=check.measured_weight_g,
+            absolute_difference_g=check.absolute_difference_g,
+            difference_percent=check.difference_percent,
+            tolerance_abs_g_snapshot=check.tolerance_abs_g_snapshot,
+            tolerance_percent_snapshot=check.tolerance_percent_snapshot,
+            result=check.result,
+            checked_by_user_id=check.checked_by_user_id,
+            checked_at=check.checked_at,
+            note=check.note,
         )
 
 

@@ -64,6 +64,12 @@ def _shipment(
         recipient_city="Banja Luka",
         recipient_phone="+387 65 123 456",
         sender_name="Đorđe Čavić",
+        sender_client_id=None,
+        package_count=1,
+        length_cm=None,
+        width_cm=None,
+        height_cm=None,
+        declared_weight_g=1_000,
         courier_id=None,
         status=status,
         received_at=now,
@@ -186,6 +192,18 @@ class FakeShipmentService:
         self._call("get_open_problem", shipment_id)
         return self.problem
 
+    def get_weight_checks(self, session: SessionContext, shipment_id: int) -> tuple[()]:
+        del session
+        self._call("get_weight_checks", shipment_id)
+        return ()
+
+    def record_control_weight(
+        self, session: SessionContext, shipment_id: int, **kwargs: Any
+    ) -> object:
+        del session
+        self._call("record_control_weight", shipment_id, **kwargs)
+        return object()
+
     def change_status(
         self,
         session: SessionContext,
@@ -303,7 +321,7 @@ def test_page_loads_data_filters_paginates_and_runs_off_gui_thread(
     assert "Tracking Number" not in headers
     assert "Barcode" not in headers
     assert page.search_input.placeholderText().startswith("Shipment number")
-    assert "CET" in page.table.item(0, 9).text()
+    assert "CET" in page.table.item(0, 11).text()
     assert all(thread_id != gui_thread_id for thread_id in service.worker_thread_ids)
 
     page.search_input.setText("Željko")
@@ -570,7 +588,7 @@ def test_archive_restore_confirmation_and_permission_gating(
     qtbot.waitUntil(
         lambda: any(call[0] == "archive_shipment" for call in service.calls), timeout=3_000
     )
-    qtbot.waitUntil(lambda: page.table.item(0, 7).text() == "Yes", timeout=3_000)
+    qtbot.waitUntil(lambda: page.table.item(0, 9).text() == "Yes", timeout=3_000)
     page.table.selectRow(0)
     qtbot.mouseClick(page.restore_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(

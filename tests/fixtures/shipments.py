@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from warehouse_control_center.application.dto import SessionContext, ShipmentDTO
 from warehouse_control_center.application.services import (
     AuthenticationService,
+    ClientService,
     FirstRunAdministratorService,
     ShipmentService,
 )
@@ -40,6 +41,7 @@ class FakeClock:
 class ShipmentHarness:
     service: ShipmentService
     authentication: AuthenticationService
+    clients: ClientService
     admin: SessionContext
     operator: SessionContext
     supervisor: SessionContext
@@ -107,6 +109,7 @@ def build_shipment_harness(session_factory: SessionFactory) -> ShipmentHarness:
     return ShipmentHarness(
         ShipmentService(uow_factory, clock),
         authentication,
+        ClientService(uow_factory, clock),
         admin,
         operator,
         supervisor,

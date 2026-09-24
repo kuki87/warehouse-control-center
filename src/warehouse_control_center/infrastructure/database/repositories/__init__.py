@@ -3,6 +3,9 @@
 from warehouse_control_center.infrastructure.database.repositories.audit import (
     SqlAlchemyAuditRepository,
 )
+from warehouse_control_center.infrastructure.database.repositories.clients import (
+    SqlAlchemyClientRepository,
+)
 from warehouse_control_center.infrastructure.database.repositories.couriers import (
     SqlAlchemyCourierRepository,
 )
@@ -19,6 +22,7 @@ from warehouse_control_center.infrastructure.database.repositories.users import 
 __all__ = [
     "SqlAlchemyAuditRepository",
     "SqlAlchemyCourierRepository",
+    "SqlAlchemyClientRepository",
     "SqlAlchemyShipmentRepository",
     "SqlAlchemyShipmentNumberRepository",
     "SqlAlchemyUserRepository",

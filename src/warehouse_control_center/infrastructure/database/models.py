@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Date,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     text,
@@ -21,7 +24,25 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
+from warehouse_control_center.domain.client_validation import (
+    CLIENT_ADDRESS_MAX_LENGTH,
+    CLIENT_CITY_MAX_LENGTH,
+    CLIENT_CODE_MAX_LENGTH,
+    CLIENT_EMAIL_MAX_LENGTH,
+    CLIENT_NOTES_MAX_LENGTH,
+    CLIENT_PHONE_MAX_LENGTH,
+    COMPANY_NAME_MAX_LENGTH,
+    CONTACT_NAME_MAX_LENGTH,
+    CONTRACT_NUMBER_MAX_LENGTH,
+    TAX_ID_MAX_LENGTH,
+)
+from warehouse_control_center.domain.enums import (
+    ProblemType,
+    ShipmentStatus,
+    UserRole,
+    WeightCheckResult,
+)
+from warehouse_control_center.domain.measurements import MAX_STORED_MEASUREMENT
 from warehouse_control_center.domain.shipment_numbering import (
     SHIPMENT_NUMBER_EXHAUSTED_VALUE,
 )
@@ -136,6 +157,58 @@ class CourierModel(TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
+class ClientModel(TimestampMixin, Base):
+    __tablename__ = "clients"
+    __table_args__ = (
+        CheckConstraint(
+            f"length(trim(client_code)) BETWEEN 1 AND {CLIENT_CODE_MAX_LENGTH}",
+            name="client_code_length",
+        ),
+        CheckConstraint(
+            f"length(trim(company_name)) BETWEEN 1 AND {COMPANY_NAME_MAX_LENGTH}",
+            name="company_name_length",
+        ),
+        CheckConstraint(
+            f"length(trim(address)) BETWEEN 1 AND {CLIENT_ADDRESS_MAX_LENGTH}",
+            name="address_length",
+        ),
+        CheckConstraint(
+            f"length(trim(city)) BETWEEN 1 AND {CLIENT_CITY_MAX_LENGTH}",
+            name="city_length",
+        ),
+        CheckConstraint("active IN (0, 1)", name="active_boolean"),
+        CheckConstraint(
+            "contract_start IS NULL OR contract_end IS NULL OR contract_end >= contract_start",
+            name="contract_dates_ordered",
+        ),
+        CheckConstraint(
+            f"notes IS NULL OR length(notes) <= {CLIENT_NOTES_MAX_LENGTH}",
+            name="notes_length",
+        ),
+        Index("ix_clients_company_name", "company_name"),
+        Index("ix_clients_city", "city"),
+        Index("ix_clients_active", "active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_code: Mapped[str] = mapped_column(String(CLIENT_CODE_MAX_LENGTH), nullable=False)
+    client_code_normalized: Mapped[str] = mapped_column(
+        String(CLIENT_CODE_MAX_LENGTH), nullable=False, unique=True
+    )
+    company_name: Mapped[str] = mapped_column(String(COMPANY_NAME_MAX_LENGTH), nullable=False)
+    tax_id: Mapped[str | None] = mapped_column(String(TAX_ID_MAX_LENGTH), nullable=True)
+    address: Mapped[str] = mapped_column(String(CLIENT_ADDRESS_MAX_LENGTH), nullable=False)
+    city: Mapped[str] = mapped_column(String(CLIENT_CITY_MAX_LENGTH), nullable=False)
+    contact_name: Mapped[str | None] = mapped_column(String(CONTACT_NAME_MAX_LENGTH))
+    phone: Mapped[str | None] = mapped_column(String(CLIENT_PHONE_MAX_LENGTH))
+    email: Mapped[str | None] = mapped_column(String(CLIENT_EMAIL_MAX_LENGTH))
+    contract_number: Mapped[str | None] = mapped_column(String(CONTRACT_NUMBER_MAX_LENGTH))
+    contract_start: Mapped[date | None] = mapped_column(Date())
+    contract_end: Mapped[date | None] = mapped_column(Date())
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ShipmentNumberSequenceModel(Base):
     __tablename__ = "shipment_number_sequences"
     __table_args__ = (
@@ -160,6 +233,24 @@ class ShipmentModel(TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint(_allowed_values("status", ShipmentStatus), name="status_valid"),
         CheckConstraint("version >= 1", name="version_positive"),
+        CheckConstraint("package_count >= 1", name="package_count_positive"),
+        CheckConstraint(
+            f"length_mm IS NULL OR length_mm BETWEEN 1 AND {MAX_STORED_MEASUREMENT}",
+            name="length_mm_positive",
+        ),
+        CheckConstraint(
+            f"width_mm IS NULL OR width_mm BETWEEN 1 AND {MAX_STORED_MEASUREMENT}",
+            name="width_mm_positive",
+        ),
+        CheckConstraint(
+            f"height_mm IS NULL OR height_mm BETWEEN 1 AND {MAX_STORED_MEASUREMENT}",
+            name="height_mm_positive",
+        ),
+        CheckConstraint(
+            "declared_weight_g IS NULL OR declared_weight_g BETWEEN 1 AND "
+            f"{MAX_STORED_MEASUREMENT}",
+            name="declared_weight_g_positive",
+        ),
         CheckConstraint(
             f"length(trim(tracking_number)) >= 1 AND "
             f"length(tracking_number) <= {SHIPMENT_NUMBER_MAX_LENGTH}",
@@ -204,6 +295,7 @@ class ShipmentModel(TimestampMixin, Base):
         Index("ix_shipments_status_received_at", "status", "received_at"),
         Index("ix_shipments_recipient_city", "recipient_city"),
         Index("ix_shipments_updated_at", "updated_at"),
+        Index("ix_shipments_sender_client_id", "sender_client_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -219,6 +311,16 @@ class ShipmentModel(TimestampMixin, Base):
     recipient_city: Mapped[str] = mapped_column(String(255), nullable=False)
     recipient_phone: Mapped[str] = mapped_column(String(100), nullable=False)
     sender_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sender_client_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clients.id", ondelete="RESTRICT"), nullable=True
+    )
+    package_count: Mapped[int] = mapped_column(
+        Integer, default=1, server_default=text("1"), nullable=False
+    )
+    length_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    width_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    declared_weight_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
     courier_id: Mapped[int | None] = mapped_column(
         ForeignKey("couriers.id", ondelete="RESTRICT"), nullable=True
     )
@@ -376,6 +478,48 @@ class ShipmentProblemModel(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+
+class ShipmentWeightCheckModel(Base):
+    __tablename__ = "shipment_weight_checks"
+    __table_args__ = (
+        CheckConstraint("declared_weight_g_snapshot > 0", name="declared_weight_positive"),
+        CheckConstraint("measured_weight_g > 0", name="measured_weight_positive"),
+        CheckConstraint("absolute_difference_g >= 0", name="difference_nonnegative"),
+        CheckConstraint("tolerance_abs_g_snapshot >= 0", name="tolerance_nonnegative"),
+        CheckConstraint(_allowed_values("result", WeightCheckResult), name="result_valid"),
+        CheckConstraint("length(note) <= 2000", name="note_length"),
+        Index("ix_weight_checks_shipment_checked", "shipment_id", "checked_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(
+        ForeignKey("shipments.id", ondelete="RESTRICT"), nullable=False
+    )
+    declared_weight_g_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    measured_weight_g: Mapped[int] = mapped_column(Integer, nullable=False)
+    absolute_difference_g: Mapped[int] = mapped_column(Integer, nullable=False)
+    difference_percent: Mapped[Decimal | None] = mapped_column(Numeric(9, 4), nullable=True)
+    tolerance_abs_g_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    tolerance_percent_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(9, 4), nullable=True)
+    result: Mapped[WeightCheckResult] = mapped_column(
+        SqlEnum(
+            WeightCheckResult,
+            length=32,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    checked_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    checked_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=utc_now, server_default=text("CURRENT_TIMESTAMP"), nullable=False
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AuditEventModel(Base):

@@ -4,13 +4,15 @@ from sqlalchemy import Engine, inspect, text
 
 from warehouse_control_center.domain.exceptions import DatabaseSchemaError
 
-EXPECTED_SCHEMA_REVISION = "0006_unify_shipment_identifier"
+EXPECTED_SCHEMA_REVISION = "0007_shipment_expansion_core"
 REQUIRED_SCHEMA_TABLES = frozenset(
     {
         "alembic_version",
         "audit_events",
         "couriers",
+        "clients",
         "shipment_status_history",
+        "shipment_weight_checks",
         "shipment_problems",
         "shipment_number_sequences",
         "shipments",

@@ -115,3 +115,19 @@ class ShipmentProblemNotFoundError(WarehouseControlCenterError):
 
 class InvalidShipmentQueryError(ValidationError):
     """Raised when shipment pagination, filtering, or sorting input is invalid."""
+
+
+class InvalidClientError(ValidationError):
+    """Raised when contract-client data violates the centralized policy."""
+
+
+class DuplicateClientCodeError(WarehouseControlCenterError):
+    """Raised when a normalized client code is already reserved."""
+
+
+class ClientNotFoundError(WarehouseControlCenterError):
+    """Raised when a requested contract client does not exist."""
+
+
+class InvalidClientStateError(WarehouseControlCenterError):
+    """Raised when a requested client-state transition is invalid."""

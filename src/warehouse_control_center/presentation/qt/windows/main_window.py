@@ -7,8 +7,17 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
 from warehouse_control_center.application.dto import SessionContext
-from warehouse_control_center.application.services import ShipmentService, UserService
-from warehouse_control_center.presentation.qt.pages import PlaceholderPage, ShipmentsPage, UsersPage
+from warehouse_control_center.application.services import (
+    ClientService,
+    ShipmentService,
+    UserService,
+)
+from warehouse_control_center.presentation.qt.pages import (
+    ClientsPage,
+    PlaceholderPage,
+    ShipmentsPage,
+    UsersPage,
+)
 from warehouse_control_center.presentation.qt.widgets.sidebar import Sidebar
 
 
@@ -20,6 +29,7 @@ class MainWindow(QMainWindow):
     _PAGE_TITLES = {
         "dashboard": "Dashboard",
         "shipments": "Shipments",
+        "clients": "Clients",
         "scan": "Scan",
         "couriers": "Couriers",
         "reports": "Reports",
@@ -36,6 +46,7 @@ class MainWindow(QMainWindow):
         parent: QWidget | None = None,
         *,
         shipments: ShipmentService | None = None,
+        clients: ClientService | None = None,
         timezone_name: str = "Europe/Sarajevo",
     ) -> None:
         super().__init__(parent)
@@ -66,6 +77,16 @@ class MainWindow(QMainWindow):
                 page = ShipmentsPage(
                     session,
                     shipments,
+                    thread_pool,
+                    logger,
+                    timezone_name,
+                    clients=clients,
+                )
+                page.session_invalidated.connect(self.session_invalidated)
+            elif route == "clients" and clients is not None:
+                page = ClientsPage(
+                    session,
+                    clients,
                     thread_pool,
                     logger,
                     timezone_name,

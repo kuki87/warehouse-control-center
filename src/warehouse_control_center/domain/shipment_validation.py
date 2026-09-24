@@ -18,6 +18,7 @@ SENDER_NAME_MAX_LENGTH = 255
 NOTES_MAX_LENGTH = 4_000
 PROBLEM_DESCRIPTION_MAX_LENGTH = 2_000
 STATUS_REASON_MAX_LENGTH = 1_000
+WEIGHT_CHECK_NOTE_MAX_LENGTH = 2_000
 SEARCH_MAX_LENGTH = 500
 
 _PHONE_PUNCTUATION = frozenset("+()-./ ")
@@ -44,7 +45,7 @@ def validate_shipment_metadata(
     recipient_address: str,
     recipient_city: str,
     recipient_phone: str,
-    sender_name: str,
+    sender_name: object,
     notes: str | None,
 ) -> ValidatedShipmentMetadata:
     """Validate editable shipment metadata before allocating a sequence value."""
@@ -128,6 +129,15 @@ def validate_status_reason(value: str | None, *, required: bool) -> str | None:
     if required and canonical is None:
         raise InvalidShipmentError("A non-empty override reason is required")
     return canonical
+
+
+def validate_weight_check_note(value: str | None) -> str | None:
+    return _optional_text(
+        "Weight-check note",
+        value,
+        WEIGHT_CHECK_NOTE_MAX_LENGTH,
+        allow_line_breaks=True,
+    )
 
 
 def validate_optional_city(value: str | None) -> str | None:
