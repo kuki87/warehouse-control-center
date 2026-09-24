@@ -60,8 +60,7 @@ class UserDTO:
 @dataclass(frozen=True, slots=True)
 class ShipmentDTO:
     id: int
-    tracking_number: str
-    barcode: str
+    shipment_number: str
     recipient_name: str
     recipient_address: str
     recipient_city: str
@@ -86,8 +85,7 @@ class ShipmentDTO:
             raise ValueError("Persisted shipment must have an id")
         return cls(
             id=shipment.id,
-            tracking_number=shipment.tracking_number,
-            barcode=shipment.barcode,
+            shipment_number=shipment.shipment_number,
             recipient_name=shipment.recipient_name,
             recipient_address=shipment.recipient_address,
             recipient_city=shipment.recipient_city,

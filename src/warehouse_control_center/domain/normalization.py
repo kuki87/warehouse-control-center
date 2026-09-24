@@ -7,11 +7,7 @@ def normalize_username(value: str) -> str:
     return _normalized_text(value).casefold()
 
 
-def normalize_tracking_number(value: str) -> str:
-    return _compact_identifier(value).upper()
-
-
-def normalize_barcode(value: str) -> str:
+def normalize_shipment_number(value: str) -> str:
     return _compact_identifier(value).upper()
 
 

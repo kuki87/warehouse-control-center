@@ -85,10 +85,8 @@ def courier_to_entity(model: CourierModel) -> Courier:
 def shipment_to_model(shipment: Shipment) -> ShipmentModel:
     return ShipmentModel(
         id=shipment.id,
-        tracking_number=shipment.tracking_number,
-        tracking_number_normalized=shipment.tracking_number_normalized,
-        barcode=shipment.barcode,
-        barcode_normalized=shipment.barcode_normalized,
+        shipment_number=shipment.shipment_number,
+        shipment_number_normalized=shipment.shipment_number_normalized,
         recipient_name=shipment.recipient_name,
         recipient_address=shipment.recipient_address,
         recipient_city=shipment.recipient_city,
@@ -166,10 +164,8 @@ def problem_to_entity(model: ShipmentProblemModel) -> ShipmentProblem:
 def shipment_to_entity(model: ShipmentModel) -> Shipment:
     return Shipment(
         id=model.id,
-        tracking_number=model.tracking_number,
-        tracking_number_normalized=model.tracking_number_normalized,
-        barcode=model.barcode,
-        barcode_normalized=model.barcode_normalized,
+        shipment_number=model.shipment_number,
+        shipment_number_normalized=model.shipment_number_normalized,
         recipient_name=model.recipient_name,
         recipient_address=model.recipient_address,
         recipient_city=model.recipient_city,

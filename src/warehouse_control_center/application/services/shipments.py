@@ -37,8 +37,7 @@ from warehouse_control_center.domain.enums import (
     ShipmentStatus,
 )
 from warehouse_control_center.domain.exceptions import (
-    DuplicateBarcodeError,
-    DuplicateTrackingNumberError,
+    DuplicateShipmentNumberError,
     InvalidPasswordError,
     InvalidShipmentError,
     InvalidShipmentQueryError,
@@ -70,7 +69,7 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 _SORT_FIELDS = frozenset(
     {
-        "tracking_number",
+        "shipment_number",
         "recipient_name",
         "recipient_city",
         "status",
@@ -114,8 +113,7 @@ class ShipmentService:
             try:
                 shipment = uow.shipments.add(
                     Shipment(
-                        tracking_number=shipment_number,
-                        barcode=shipment_number,
+                        shipment_number=shipment_number,
                         recipient_name=fields.recipient_name,
                         recipient_address=fields.recipient_address,
                         recipient_city=fields.recipient_city,
@@ -130,7 +128,7 @@ class ShipmentService:
                         version=1,
                     )
                 )
-            except (DuplicateTrackingNumberError, DuplicateBarcodeError) as error:
+            except DuplicateShipmentNumberError as error:
                 raise ShipmentNumberAllocationError(
                     "Shipment number conflicts with an existing identifier"
                 ) from error
@@ -140,7 +138,7 @@ class ShipmentService:
                     actor,
                     shipment,
                     now,
-                    details={"tracking_number": shipment.tracking_number},
+                    details={"shipment_number": shipment.shipment_number},
                 )
             )
             uow.commit()
@@ -166,8 +164,7 @@ class ShipmentService:
             _require_operational(shipment)
             _require_expected_version(shipment, expected_version)
             fields = validate_shipment_fields(
-                tracking_number=shipment.tracking_number,
-                barcode=shipment.barcode,
+                shipment_number=shipment.shipment_number,
                 recipient_name=recipient_name,
                 recipient_address=recipient_address,
                 recipient_city=recipient_city,
@@ -191,7 +188,7 @@ class ShipmentService:
                     saved,
                     now,
                     details={
-                        "tracking_number": saved.tracking_number,
+                        "shipment_number": saved.shipment_number,
                         "fields": [
                             "recipient_name",
                             "recipient_address",
@@ -211,22 +208,12 @@ class ShipmentService:
             _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
             return ShipmentDTO.from_entity(_get_shipment(uow, shipment_id))
 
-    def get_by_tracking_number(self, session: SessionContext, tracking_number: str) -> ShipmentDTO:
-        if not tracking_number or not tracking_number.strip():
-            raise InvalidShipmentError("Tracking number is required")
+    def get_by_shipment_number(self, session: SessionContext, shipment_number: str) -> ShipmentDTO:
+        if not shipment_number or not shipment_number.strip():
+            raise InvalidShipmentError("Shipment number is required")
         with self._uow_factory() as uow:
             _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
-            shipment = uow.shipments.get_by_normalized_tracking_number(tracking_number)
-            if shipment is None:
-                raise ShipmentNotFoundError("Shipment does not exist")
-            return ShipmentDTO.from_entity(shipment)
-
-    def get_by_barcode(self, session: SessionContext, barcode: str) -> ShipmentDTO:
-        if not barcode or not barcode.strip():
-            raise InvalidShipmentError("Barcode is required")
-        with self._uow_factory() as uow:
-            _require_current_actor(uow, session, Permission.VIEW_SHIPMENTS)
-            shipment = uow.shipments.get_by_normalized_barcode(barcode)
+            shipment = uow.shipments.get_by_normalized_shipment_number(shipment_number)
             if shipment is None:
                 raise ShipmentNotFoundError("Shipment does not exist")
             return ShipmentDTO.from_entity(shipment)
@@ -372,7 +359,7 @@ class ShipmentService:
                     saved,
                     now,
                     details={
-                        "tracking_number": saved.tracking_number,
+                        "shipment_number": saved.shipment_number,
                         "old_status": old_status.value,
                         "new_status": target_status.value,
                         "reason": canonical_reason,
@@ -430,7 +417,7 @@ class ShipmentService:
                     actor,
                     saved,
                     now,
-                    details={"tracking_number": saved.tracking_number},
+                    details={"shipment_number": saved.shipment_number},
                 )
             )
             uow.commit()
@@ -486,7 +473,7 @@ class ShipmentService:
                     saved,
                     now,
                     details={
-                        "tracking_number": saved.tracking_number,
+                        "shipment_number": saved.shipment_number,
                         "old_status": previous_status.value,
                         "problem_type": validated_type.value,
                     },
@@ -543,7 +530,7 @@ class ShipmentService:
                     saved,
                     now,
                     details={
-                        "tracking_number": saved.tracking_number,
+                        "shipment_number": saved.shipment_number,
                         "new_status": target.value,
                         "problem_type": problem.problem_type.value,
                     },
@@ -642,7 +629,7 @@ def _shipment_audit(
         action=action,
         actor_id=_persisted_id(actor),
         actor_name=actor.username,
-        entity_id=shipment.id or shipment.tracking_number_normalized,
+        entity_id=shipment.id or shipment.shipment_number_normalized,
         entity_type="SHIPMENT",
         timestamp=timestamp,
         details=details,

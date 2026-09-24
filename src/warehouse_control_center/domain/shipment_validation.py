@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from warehouse_control_center.domain.enums import ProblemType
 from warehouse_control_center.domain.exceptions import InvalidShipmentError
 
-TRACKING_NUMBER_MAX_LENGTH = 255
-BARCODE_MAX_LENGTH = 255
+SHIPMENT_NUMBER_MAX_LENGTH = 255
 RECIPIENT_NAME_MAX_LENGTH = 255
 RECIPIENT_ADDRESS_MAX_LENGTH = 500
 RECIPIENT_CITY_MAX_LENGTH = 255
@@ -36,8 +35,7 @@ class ValidatedShipmentMetadata:
 
 @dataclass(frozen=True, slots=True)
 class ValidatedShipmentFields(ValidatedShipmentMetadata):
-    tracking_number: str
-    barcode: str
+    shipment_number: str
 
 
 def validate_shipment_metadata(
@@ -64,8 +62,7 @@ def validate_shipment_metadata(
 
 def validate_shipment_fields(
     *,
-    tracking_number: str,
-    barcode: str,
+    shipment_number: str,
     recipient_name: str,
     recipient_address: str,
     recipient_city: str,
@@ -89,10 +86,9 @@ def validate_shipment_fields(
         recipient_phone=metadata.recipient_phone,
         sender_name=metadata.sender_name,
         notes=metadata.notes,
-        tracking_number=_required_text(
-            "Tracking number", tracking_number, TRACKING_NUMBER_MAX_LENGTH
+        shipment_number=_required_text(
+            "Shipment number", shipment_number, SHIPMENT_NUMBER_MAX_LENGTH
         ),
-        barcode=_required_text("Barcode", barcode, BARCODE_MAX_LENGTH),
     )
 
 

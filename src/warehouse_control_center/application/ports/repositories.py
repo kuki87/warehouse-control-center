@@ -15,7 +15,7 @@ from warehouse_control_center.domain.entities import (
 from warehouse_control_center.domain.enums import ShipmentStatus
 
 ShipmentSortField = Literal[
-    "tracking_number",
+    "shipment_number",
     "recipient_name",
     "recipient_city",
     "status",
@@ -77,9 +77,7 @@ class ShipmentRepository(Protocol):
 
     def get_by_id(self, shipment_id: int) -> Shipment | None: ...
 
-    def get_by_normalized_tracking_number(self, tracking_number: str) -> Shipment | None: ...
-
-    def get_by_normalized_barcode(self, barcode: str) -> Shipment | None: ...
+    def get_by_normalized_shipment_number(self, shipment_number: str) -> Shipment | None: ...
 
     def save(self, shipment: Shipment) -> Shipment: ...
 

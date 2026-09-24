@@ -26,7 +26,6 @@ from warehouse_control_center.domain.shipment_numbering import (
     SHIPMENT_NUMBER_EXHAUSTED_VALUE,
 )
 from warehouse_control_center.domain.shipment_validation import (
-    BARCODE_MAX_LENGTH,
     NOTES_MAX_LENGTH,
     PROBLEM_DESCRIPTION_MAX_LENGTH,
     RECIPIENT_ADDRESS_MAX_LENGTH,
@@ -35,8 +34,8 @@ from warehouse_control_center.domain.shipment_validation import (
     RECIPIENT_PHONE_MAX_LENGTH,
     RECIPIENT_PHONE_MIN_LENGTH,
     SENDER_NAME_MAX_LENGTH,
+    SHIPMENT_NUMBER_MAX_LENGTH,
     STATUS_REASON_MAX_LENGTH,
-    TRACKING_NUMBER_MAX_LENGTH,
 )
 from warehouse_control_center.infrastructure.database.base import Base, UTCDateTime, utc_now
 
@@ -163,22 +162,13 @@ class ShipmentModel(TimestampMixin, Base):
         CheckConstraint("version >= 1", name="version_positive"),
         CheckConstraint(
             f"length(trim(tracking_number)) >= 1 AND "
-            f"length(tracking_number) <= {TRACKING_NUMBER_MAX_LENGTH}",
-            name="tracking_number_length",
+            f"length(tracking_number) <= {SHIPMENT_NUMBER_MAX_LENGTH}",
+            name="shipment_number_length",
         ),
         CheckConstraint(
             "length(trim(tracking_number_normalized)) >= 1 AND "
-            f"length(tracking_number_normalized) <= {TRACKING_NUMBER_MAX_LENGTH}",
-            name="tracking_number_normalized_length",
-        ),
-        CheckConstraint(
-            f"length(trim(barcode)) >= 1 AND length(barcode) <= {BARCODE_MAX_LENGTH}",
-            name="barcode_length",
-        ),
-        CheckConstraint(
-            "length(trim(barcode_normalized)) >= 1 AND "
-            f"length(barcode_normalized) <= {BARCODE_MAX_LENGTH}",
-            name="barcode_normalized_length",
+            f"length(tracking_number_normalized) <= {SHIPMENT_NUMBER_MAX_LENGTH}",
+            name="shipment_number_normalized_length",
         ),
         CheckConstraint(
             f"length(trim(recipient_name)) >= 1 AND "
@@ -217,12 +207,13 @@ class ShipmentModel(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tracking_number: Mapped[str] = mapped_column(String(255), nullable=False)
-    tracking_number_normalized: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True
+    # The physical column names are retained through Phase 3D to avoid a risky SQLite
+    # table-wide identifier rename.  The ORM and every layer above it expose only the
+    # canonical shipment-number terminology.
+    shipment_number: Mapped[str] = mapped_column("tracking_number", String(255), nullable=False)
+    shipment_number_normalized: Mapped[str] = mapped_column(
+        "tracking_number_normalized", String(255), nullable=False, unique=True
     )
-    barcode: Mapped[str] = mapped_column(String(255), nullable=False)
-    barcode_normalized: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     recipient_name: Mapped[str] = mapped_column(String(255), nullable=False)
     recipient_address: Mapped[str] = mapped_column(String(500), nullable=False)
     recipient_city: Mapped[str] = mapped_column(String(255), nullable=False)

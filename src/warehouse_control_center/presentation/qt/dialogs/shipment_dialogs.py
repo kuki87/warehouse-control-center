@@ -69,7 +69,7 @@ class NewShipmentDialog(QDialog):
         layout.addWidget(title)
         form = QFormLayout()
         form.setSpacing(11)
-        number_note = QLabel("Shipment number and barcode will be generated automatically.")
+        number_note = QLabel("Shipment number will be generated automatically.")
         number_note.setObjectName("shipmentNumberNote")
         number_note.setWordWrap(True)
         number_note.setProperty("muted", True)
@@ -155,7 +155,7 @@ class EditShipmentDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 24, 26, 22)
         layout.setSpacing(14)
-        title = QLabel(f"Edit {shipment.tracking_number}")
+        title = QLabel(f"Edit {shipment.shipment_number}")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
         form = QFormLayout()
@@ -458,12 +458,12 @@ class ShipmentDetailsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         shipment = details.shipment
-        self.setWindowTitle(f"Shipment {shipment.tracking_number}")
+        self.setWindowTitle(f"Shipment {shipment.shipment_number}")
         self.setModal(True)
         self.resize(780, 600)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
-        title = QLabel(f"Shipment {shipment.tracking_number}")
+        title = QLabel(f"Shipment {shipment.shipment_number}")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
         tabs = QTabWidget()
@@ -485,8 +485,7 @@ class ShipmentDetailsDialog(QDialog):
         tab = QWidget()
         form = QFormLayout(tab)
         values = (
-            ("Tracking number", shipment.tracking_number),
-            ("Barcode", shipment.barcode),
+            ("Shipment number", shipment.shipment_number),
             ("Status", display_enum(shipment.status.value)),
             ("Sender", shipment.sender_name),
             ("Recipient", shipment.recipient_name),

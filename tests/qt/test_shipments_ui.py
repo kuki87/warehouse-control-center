@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 from PySide6.QtCore import Qt, QThreadPool
-from PySide6.QtWidgets import QLineEdit, QPushButton
+from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton
 from pytestqt.qtbot import QtBot
 
 from warehouse_control_center.application.dto import (
@@ -58,8 +58,7 @@ def _shipment(
     now = datetime(2026, 1, 1, 12, tzinfo=UTC)
     return ShipmentDTO(
         id=10,
-        tracking_number="TRK-000010",
-        barcode="BAR-000010",
+        shipment_number="SHP-000010",
         recipient_name="Željko Šarić",
         recipient_address="Ćirila i Metodija 10",
         recipient_city="Banja Luka",
@@ -132,8 +131,7 @@ class FakeShipmentService:
         self._call("create_shipment", **kwargs)
         created = replace(
             _shipment(),
-            tracking_number="E000000123",
-            barcode="E000000123",
+            shipment_number="E000000123",
             recipient_name=cast(str, kwargs["recipient_name"]),
         )
         self.records = [created]
@@ -297,7 +295,14 @@ def test_page_loads_data_filters_paginates_and_runs_off_gui_thread(
     service = FakeShipmentService(_shipment())
     page = _page(qtbot, thread_pool, service)
     assert page.table.rowCount() == 1
-    assert page.table.item(0, 0).text() == "TRK-000010"
+    assert page.table.item(0, 0).text() == "SHP-000010"
+    headers = [
+        page.table.horizontalHeaderItem(index).text() for index in range(page.table.columnCount())
+    ]
+    assert headers[0] == "Shipment Number"
+    assert "Tracking Number" not in headers
+    assert "Barcode" not in headers
+    assert page.search_input.placeholderText().startswith("Shipment number")
     assert "CET" in page.table.item(0, 9).text()
     assert all(thread_id != gui_thread_id for thread_id in service.worker_thread_ids)
 
@@ -346,8 +351,8 @@ def test_stale_load_response_cannot_replace_newer_results(
     service = FakeShipmentService(_shipment())
     page = _page(qtbot, thread_pool, service)
     current_generation = page._load_generation
-    newer = replace(_shipment(), tracking_number="NEWEST")
-    older = replace(_shipment(), tracking_number="STALE")
+    newer = replace(_shipment(), shipment_number="NEWEST")
+    older = replace(_shipment(), shipment_number="STALE")
     page._populate(
         current_generation,
         None,
@@ -438,7 +443,7 @@ def test_create_and_edit_success_use_supported_fields_and_expected_version(
     qtbot.waitUntil(lambda: page.table.item(0, 0).text() == "E000000123", timeout=3_000)
     assert "E000000123" in page.status.message
     create_call = next(call for call in service.calls if call[0] == "create_shipment")
-    assert "tracking_number" not in create_call[2]
+    assert "shipment_number" not in create_call[2]
     assert "barcode" not in create_call[2]
 
     page.table.selectRow(0)
@@ -507,7 +512,7 @@ def test_status_success_details_and_history(qtbot: QtBot, thread_pool: QThreadPo
     dialog = cast(ChangeStatusDialog, page._status_dialog)
     qtbot.mouseClick(dialog.change_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: not dialog.isVisible(), timeout=3_000)
-    qtbot.waitUntil(lambda: page.table.item(0, 5).text() == "Sorting", timeout=3_000)
+    qtbot.waitUntil(lambda: page.table.item(0, 4).text() == "Sorting", timeout=3_000)
     page.table.selectRow(0)
     qtbot.mouseClick(page.details_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(
@@ -515,6 +520,10 @@ def test_status_success_details_and_history(qtbot: QtBot, thread_pool: QThreadPo
         timeout=3_000,
     )
     details = cast(ShipmentDetailsDialog, page._details_dialog)
+    labels = {label.text() for label in details.findChildren(QLabel)}
+    assert "Shipment number" in labels
+    assert "Tracking number" not in labels
+    assert "Barcode" not in labels
     history = details.findChild(type(page.table), "shipmentHistoryTable")
     assert history is not None and history.rowCount() == 1
 
@@ -532,7 +541,7 @@ def test_problem_report_duplicate_resolve_and_invalid_recovery(
     qtbot.waitUntil(lambda: "unresolved" in report.status.message, timeout=3_000)
     qtbot.mouseClick(report.report_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: not report.isVisible(), timeout=3_000)
-    qtbot.waitUntil(lambda: page.table.item(0, 5).text() == "Problem", timeout=3_000)
+    qtbot.waitUntil(lambda: page.table.item(0, 4).text() == "Problem", timeout=3_000)
 
     page.table.selectRow(0)
     qtbot.mouseClick(page.resolve_problem_button, Qt.MouseButton.LeftButton)
@@ -561,7 +570,7 @@ def test_archive_restore_confirmation_and_permission_gating(
     qtbot.waitUntil(
         lambda: any(call[0] == "archive_shipment" for call in service.calls), timeout=3_000
     )
-    qtbot.waitUntil(lambda: page.table.item(0, 8).text() == "Yes", timeout=3_000)
+    qtbot.waitUntil(lambda: page.table.item(0, 7).text() == "Yes", timeout=3_000)
     page.table.selectRow(0)
     qtbot.mouseClick(page.restore_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(

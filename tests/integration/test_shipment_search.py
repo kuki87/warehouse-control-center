@@ -26,13 +26,10 @@ def test_exact_lookup_and_partial_search_fields(harness: ShipmentHarness) -> Non
     )
 
     assert (
-        harness.service.get_by_tracking_number(harness.operator, shipment.tracking_number).id
+        harness.service.get_by_shipment_number(harness.operator, shipment.shipment_number).id
         == shipment.id
     )
-    assert (
-        harness.service.get_by_barcode(harness.operator, shipment.barcode.lower()).id == shipment.id
-    )
-    for term in ("Amila", "555 222", "oslobođenja", shipment.tracking_number[2:]):
+    for term in ("Amila", "555 222", "oslobođenja", shipment.shipment_number[2:]):
         result = harness.service.list_shipments(harness.operator, search=term)
         assert [item.id for item in result.items] == [shipment.id]
 
@@ -96,7 +93,7 @@ def test_filters_sorting_pagination_and_archived_inclusion(
         page=1,
         page_size=1,
         include_archived=True,
-        sort_by="tracking_number",
+        sort_by="shipment_number",
         sort_direction="asc",
     )
     page_two = harness.service.list_shipments(
@@ -104,7 +101,7 @@ def test_filters_sorting_pagination_and_archived_inclusion(
         page=2,
         page_size=1,
         include_archived=True,
-        sort_by="tracking_number",
+        sort_by="shipment_number",
         sort_direction="asc",
     )
     assert page_one.total == 3
@@ -171,8 +168,6 @@ def test_ten_thousand_row_pagination_and_query_plans_are_indexed(
         {
             "tracking_number": f"PERF-{index:05d}",
             "tracking_number_normalized": f"PERF-{index:05d}",
-            "barcode": f"PERF-BAR-{index:05d}",
-            "barcode_normalized": f"PERF-BAR-{index:05d}",
             "recipient_name": f"Recipient {index}",
             "recipient_address": f"Address {index}",
             "recipient_city": "Mostar" if index % 2 else "Sarajevo",
@@ -201,13 +196,9 @@ def test_ten_thousand_row_pagination_and_query_plans_are_indexed(
 
     with engine.connect() as connection:
         plans = {
-            "tracking": connection.exec_driver_sql(
+            "shipment_number": connection.exec_driver_sql(
                 "EXPLAIN QUERY PLAN SELECT id FROM shipments WHERE tracking_number_normalized = ?",
                 ("PERF-05000",),
-            ).all(),
-            "barcode": connection.exec_driver_sql(
-                "EXPLAIN QUERY PLAN SELECT id FROM shipments WHERE barcode_normalized = ?",
-                ("PERF-BAR-05000",),
             ).all(),
             "status": connection.execute(
                 text(

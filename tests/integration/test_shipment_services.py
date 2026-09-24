@@ -88,17 +88,78 @@ def test_create_shipment_sets_received_state_and_atomic_audit(
         )
         assert event is not None
         assert event.entity_type == "SHIPMENT"
-        assert event.details_json == {"tracking_number": shipment.tracking_number}
+        assert event.details_json == {"shipment_number": shipment.shipment_number}
 
 
-def test_creation_allocates_sequential_tracking_and_barcode_values(
+def test_creation_allocates_sequential_shipment_numbers(
     harness: ShipmentHarness,
 ) -> None:
     first = harness.create()
     second = harness.create()
 
-    assert first.tracking_number == first.barcode == "E000000001"
-    assert second.tracking_number == second.barcode == "E000000002"
+    assert first.shipment_number == "E000000001"
+    assert second.shipment_number == "E000000002"
+
+
+def test_all_shipment_audit_payloads_use_only_the_canonical_identifier(
+    harness: ShipmentHarness,
+    session_factory: SessionFactory,
+) -> None:
+    created = harness.create()
+    updated = harness.service.update_shipment(
+        harness.supervisor,
+        created.id,
+        expected_version=created.version,
+        recipient_name=created.recipient_name,
+        recipient_address=created.recipient_address,
+        recipient_city=created.recipient_city,
+        recipient_phone=created.recipient_phone,
+        sender_name=created.sender_name,
+        notes="Updated",
+    )
+    sorting = harness.service.change_status(
+        harness.operator,
+        created.id,
+        ShipmentStatus.SORTING,
+        expected_version=updated.version,
+    ).shipment
+    harness.service.report_problem(
+        harness.operator,
+        created.id,
+        ProblemType.DAMAGED,
+        expected_version=sorting.version,
+    )
+    in_problem = harness.service.get_shipment(harness.admin, created.id)
+    harness.service.resolve_problem(
+        harness.supervisor,
+        created.id,
+        expected_version=in_problem.version,
+    )
+    resolved = harness.service.get_shipment(harness.admin, created.id)
+    archived = harness.service.archive_shipment(
+        harness.admin,
+        created.id,
+        expected_version=resolved.version,
+    )
+    harness.service.restore_shipment(
+        harness.admin,
+        created.id,
+        expected_version=archived.version,
+    )
+
+    with session_factory() as database:
+        events = list(
+            database.scalars(
+                select(AuditEventModel)
+                .where(AuditEventModel.entity_type == "SHIPMENT")
+                .order_by(AuditEventModel.id)
+            )
+        )
+    assert len(events) == 7
+    for event in events:
+        assert event.details_json["shipment_number"] == created.shipment_number
+        assert "tracking_number" not in event.details_json
+        assert "barcode" not in event.details_json
 
 
 def test_missing_inactive_and_forged_actor_sessions_are_rejected(

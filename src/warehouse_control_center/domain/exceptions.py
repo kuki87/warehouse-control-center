@@ -85,12 +85,8 @@ class ShipmentNotFoundError(WarehouseControlCenterError):
     """Raised when a requested shipment does not exist."""
 
 
-class DuplicateTrackingNumberError(WarehouseControlCenterError):
-    """Raised when a normalized tracking number is already reserved."""
-
-
-class DuplicateBarcodeError(WarehouseControlCenterError):
-    """Raised when a normalized barcode is already reserved."""
+class DuplicateShipmentNumberError(WarehouseControlCenterError):
+    """Raised when a normalized shipment number is already reserved."""
 
 
 class ShipmentNumberExhaustedError(WarehouseControlCenterError):

@@ -5,7 +5,7 @@ and dispatching parcel shipments. The repository contains the first production P
 desktop UI plus the Phase 3A shipment-domain backend. Login, one-time first-run administrator
 handling, mandatory password change, permission-based navigation, user administration, and
 logout are available in the UI. Shipment operations are implemented behind application
-services but remain an explicit UI placeholder until the shipment UI phase. Courier,
+services and the shipment UI. Courier,
 reporting, audit-log, and settings workflows remain placeholders for later phases.
 
 ## Architecture
@@ -25,7 +25,7 @@ the transaction boundary.
 
 ## Shipment-domain behavior
 
-Shipment tracking numbers and barcodes are normalized with Unicode NFKC, whitespace
+The canonical shipment number is normalized with Unicode NFKC, whitespace
 removal, and case folding to uppercase for indexed equality. Punctuation is preserved:
 `ABC-123` and `ABC123` are intentionally different identifiers. Creation starts
 a shipment in `RECEIVED`; status history begins with the first real transition rather than a
@@ -39,7 +39,7 @@ explicit recovery status accepted by the workflow policy. Shipment mutations, hi
 problem records, and audit events share one Unit-of-Work transaction.
 
 Shipment queries use bounded database pagination, allow-listed sorting, and indexed exact
-tracking/barcode lookups. Archived shipments are excluded unless explicitly requested. The
+shipment-number lookup. Archived shipments are excluded unless explicitly requested. The
 SQLite deployment remains a single-workstation design; optimistic version checks prevent a
 stale editor from silently overwriting a newer shipment update.
 

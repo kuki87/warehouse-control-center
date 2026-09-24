@@ -82,7 +82,7 @@ def test_upgrade_phase1_database_with_referenced_user_to_head(
                     "(tracking_number, tracking_number_normalized, barcode, "
                     "barcode_normalized, recipient_name, recipient_address, recipient_city, "
                     "recipient_phone, sender_name, status, received_at, created_by, version) "
-                    "VALUES ('T', 'T', 'B', 'B', 'Name', 'Address', 'City', '123', "
+                    "VALUES ('T', 'T', 'T', 'T', 'Name', 'Address', 'City', '123', "
                     "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
                 ),
                 {"user_id": user_id},
@@ -128,7 +128,7 @@ def test_upgrade_populated_authentication_head_to_shipment_domain(
                     "(tracking_number, tracking_number_normalized, barcode, "
                     "barcode_normalized, recipient_name, recipient_address, recipient_city, "
                     "recipient_phone, sender_name, status, received_at, created_by, version) "
-                    "VALUES ('TRK-1', 'TRK-1', 'BAR-1', 'BAR-1', 'Željko', "
+                    "VALUES ('TRK-1', 'TRK-1', 'TRK-1', 'TRK-1', 'Željko', "
                     "'Ćirila i Metodija 10', 'Banja Luka', '+387 65 123 456', "
                     "'Đorđe', 'SORTING', CURRENT_TIMESTAMP, :user_id, 1) RETURNING id"
                 ),
@@ -559,7 +559,8 @@ def test_automatic_numbering_migration_initializes_from_exact_legacy_identifiers
     finally:
         engine.dispose()
 
-    upgrade_to_head(test_settings)
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0005_automatic_shipment_numbering")
     engine = create_engine(test_settings.database_url)
     try:
         with engine.connect() as connection:
@@ -616,7 +617,8 @@ def test_automatic_numbering_migration_considers_compatible_legacy_barcodes(
     finally:
         engine.dispose()
 
-    upgrade_to_head(test_settings)
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0005_automatic_shipment_numbering")
     engine = create_engine(test_settings.database_url)
     try:
         with engine.connect() as connection:
@@ -631,7 +633,9 @@ def test_automatic_numbering_migration_considers_compatible_legacy_barcodes(
 def test_automatic_numbering_downgrade_and_reupgrade_recomputes_safely(
     test_settings: Settings,
 ) -> None:
-    upgrade_to_head(test_settings)
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0005_automatic_shipment_numbering")
     engine = create_engine(test_settings.database_url)
     try:
         with engine.begin() as connection:
@@ -673,18 +677,197 @@ def test_automatic_numbering_downgrade_and_reupgrade_recomputes_safely(
         engine.dispose()
 
 
+def test_unified_identifier_migration_preserves_matching_and_archived_shipments(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0005_automatic_shipment_numbering")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, "
+                    "archived_at, version) VALUES ('LEGACY-42', 'LEGACY-42', "
+                    "'LEGACY-42', 'LEGACY-42', 'Name', 'Address', 'City', '123', "
+                    "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, "
+                    "'2026-01-02 03:04:05', 1)"
+                ),
+                {"user_id": user_id},
+            )
+            connection.execute(
+                text(
+                    "UPDATE shipment_number_sequences SET next_value = 42 "
+                    "WHERE name = 'shipment_number'"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        columns = {column["name"] for column in inspect(engine).get_columns("shipments")}
+        assert "tracking_number" in columns
+        assert "tracking_number_normalized" in columns
+        assert "barcode" not in columns
+        assert "barcode_normalized" not in columns
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT tracking_number, tracking_number_normalized, archived_at FROM shipments"
+                )
+            ).one() == ("LEGACY-42", "LEGACY-42", "2026-01-02 03:04:05")
+            assert connection.scalar(text("SELECT next_value FROM shipment_number_sequences")) == 42
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("tracking", "tracking_normalized", "barcode", "barcode_normalized"),
+    [
+        ("LEGACY-1", "LEGACY-1", "LEGACY-2", "LEGACY-2"),
+        ("LEGACY-1", "LEGACY-1", "LEGACY-1", "DIFFERENT"),
+    ],
+)
+def test_unified_identifier_migration_rejects_inconsistent_duplicates(
+    test_settings: Settings,
+    tracking: str,
+    tracking_normalized: str,
+    barcode: str,
+    barcode_normalized: str,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0005_automatic_shipment_numbering")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, barcode, "
+                    "barcode_normalized, recipient_name, recipient_address, recipient_city, "
+                    "recipient_phone, sender_name, status, received_at, created_by, version) "
+                    "VALUES (:tracking, :tracking_normalized, :barcode, :barcode_normalized, "
+                    "'Name', 'Address', 'City', '123', 'Sender', 'RECEIVED', "
+                    "CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {
+                    "tracking": tracking,
+                    "tracking_normalized": tracking_normalized,
+                    "barcode": barcode,
+                    "barcode_normalized": barcode_normalized,
+                    "user_id": user_id,
+                },
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        with pytest.raises(RuntimeError, match="identifiers.*disagree"):
+            command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        assert inspect(engine).has_table("shipments")
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                "0005_automatic_shipment_numbering"
+            )
+            assert connection.execute(
+                text("SELECT tracking_number, barcode FROM shipments")
+            ).one() == (tracking, barcode)
+    finally:
+        engine.dispose()
+
+
+def test_unified_identifier_downgrade_and_reupgrade_are_reversible(
+    test_settings: Settings,
+) -> None:
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, recipient_name, "
+                    "recipient_address, recipient_city, recipient_phone, sender_name, status, "
+                    "received_at, created_by, version) VALUES ('E000000123', 'E000000123', "
+                    "'Name', 'Address', 'City', '123', 'Sender', 'RECEIVED', "
+                    "CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.downgrade(config, "0005_automatic_shipment_numbering")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT tracking_number, barcode FROM shipments")
+            ).one() == ("E000000123", "E000000123")
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "head")
+    engine = create_engine(test_settings.database_url)
+    try:
+        columns = {column["name"] for column in inspect(engine).get_columns("shipments")}
+        assert "barcode" not in columns
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT tracking_number FROM shipments")) == (
+                "E000000123"
+            )
+    finally:
+        engine.dispose()
+
+
 def test_exact_identifier_lookups_use_unique_indexes(engine: Engine) -> None:
     queries = {
         "users": "username_normalized",
         "couriers": "courier_code_normalized",
-        "shipments-tracking": "tracking_number_normalized",
-        "shipments-barcode": "barcode_normalized",
+        "shipments": "tracking_number_normalized",
     }
     tables = {
         "users": "users",
         "couriers": "couriers",
-        "shipments-tracking": "shipments",
-        "shipments-barcode": "shipments",
+        "shipments": "shipments",
     }
 
     with engine.connect() as connection:

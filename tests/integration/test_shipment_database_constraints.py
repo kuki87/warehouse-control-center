@@ -27,8 +27,6 @@ def test_database_rejects_blank_identifiers_and_overlong_notes(
                 .values(
                     tracking_number="",
                     tracking_number_normalized="",
-                    barcode="OTHER",
-                    barcode_normalized="OTHER",
                     recipient_name="Name",
                     recipient_address="Address",
                     recipient_city="City",

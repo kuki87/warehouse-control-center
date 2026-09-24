@@ -54,7 +54,7 @@ def test_concurrent_independent_sessions_allocate_unique_increasing_numbers(
             recipient_city="Sarajevo",
             recipient_phone=f"+387 61 {index:06d}",
             sender_name="Concurrent Sender",
-        ).tracking_number
+        ).shipment_number
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         numbers = list(executor.map(create, range(20)))
@@ -63,11 +63,9 @@ def test_concurrent_independent_sessions_allocate_unique_increasing_numbers(
     assert len(numbers) == len(set(numbers))
     with session_factory() as database:
         persisted = list(
-            database.scalars(select(ShipmentModel.tracking_number).order_by(ShipmentModel.id))
+            database.scalars(select(ShipmentModel.shipment_number).order_by(ShipmentModel.id))
         )
-        barcodes = list(database.scalars(select(ShipmentModel.barcode)))
     assert sorted(persisted) == sorted(numbers)
-    assert len(barcodes) == len(set(barcodes)) == 20
     assert _next_value(session_factory) == 21
 
 
@@ -86,9 +84,9 @@ def test_archived_or_deleted_shipments_never_make_numbers_reusable(
         database.execute(delete(ShipmentModel).where(ShipmentModel.id == second.id))
     third = harness.create()
 
-    assert first.tracking_number == "E000000001"
-    assert second.tracking_number == "E000000002"
-    assert third.tracking_number == "E000000003"
+    assert first.shipment_number == "E000000001"
+    assert second.shipment_number == "E000000002"
+    assert third.shipment_number == "E000000003"
 
 
 def test_allocation_and_shipment_insert_roll_back_when_persistence_fails(
@@ -127,7 +125,7 @@ def test_allocation_rolls_back_with_audit_and_next_create_reuses_uncommitted_val
 
     monkeypatch.setattr(SqlAlchemyAuditRepository, "add", original_add)
     created = harness.create()
-    assert created.tracking_number == created.barcode == "E000000001"
+    assert created.shipment_number == "E000000001"
     assert _next_value(session_factory) == 2
 
 
@@ -171,10 +169,8 @@ def test_identifier_conflict_is_reported_as_allocation_failure_and_rolls_back(
     with session_factory.begin() as database:
         database.add(
             ShipmentModel(
-                tracking_number="E000000001",
-                tracking_number_normalized="E000000001",
-                barcode="LEGACY-BARCODE",
-                barcode_normalized="LEGACY-BARCODE",
+                shipment_number="E000000001",
+                shipment_number_normalized="E000000001",
                 recipient_name="Legacy",
                 recipient_address="Legacy address",
                 recipient_city="Sarajevo",

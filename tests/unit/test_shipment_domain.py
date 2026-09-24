@@ -1,9 +1,11 @@
 """Shipment validation, normalization, and workflow are centralized and exhaustive."""
 
 import inspect
+from dataclasses import fields
 
 import pytest
 
+from warehouse_control_center.application.dto import ShipmentDTO
 from warehouse_control_center.application.services import ShipmentService
 from warehouse_control_center.domain.entities import Shipment
 from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus
@@ -11,7 +13,7 @@ from warehouse_control_center.domain.exceptions import (
     InvalidShipmentError,
     InvalidShipmentTransitionError,
 )
-from warehouse_control_center.domain.normalization import normalize_tracking_number
+from warehouse_control_center.domain.normalization import normalize_shipment_number
 from warehouse_control_center.domain.shipment_validation import (
     NOTES_MAX_LENGTH,
     validate_problem,
@@ -27,8 +29,7 @@ from warehouse_control_center.domain.shipment_workflow import (
 
 def _shipment(**overrides: object) -> Shipment:
     values: dict[str, object] = {
-        "tracking_number": "ABC-123",
-        "barcode": "BAR-123",
+        "shipment_number": "ABC-123",
         "recipient_name": "Željko Šarić",
         "recipient_address": "Ćirila i Metodija 10/2",
         "recipient_city": "Banja Luka",
@@ -47,15 +48,22 @@ def test_unicode_and_business_punctuation_are_preserved() -> None:
     assert shipment.recipient_address == "Ćirila i Metodija 10/2"
     assert shipment.sender_name == "Đorđe Čavić"
     assert shipment.notes == "Pažljivo!\nUlaz #2"
-    assert normalize_tracking_number(" ABC-123 ") == "ABC-123"
-    assert normalize_tracking_number("ABC-123") != normalize_tracking_number("ABC123")
+    assert normalize_shipment_number(" ABC-123 ") == "ABC-123"
+    assert normalize_shipment_number("ABC-123") != normalize_shipment_number("ABC123")
+
+
+def test_domain_and_dto_expose_only_the_canonical_shipment_number() -> None:
+    for model in (Shipment, ShipmentDTO):
+        names = {item.name for item in fields(model)}
+        assert "shipment_number" in names
+        assert "tracking_number" not in names
+        assert "barcode" not in names
 
 
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("tracking_number", "  ", "Tracking number is required"),
-        ("barcode", "", "Barcode is required"),
+        ("shipment_number", "  ", "Shipment number is required"),
         ("recipient_name", "", "Recipient name is required"),
         ("recipient_address", "", "Recipient address is required"),
         ("recipient_city", "", "Recipient city is required"),

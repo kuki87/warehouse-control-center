@@ -14,16 +14,12 @@ from warehouse_control_center.domain.entities import (
 )
 from warehouse_control_center.domain.exceptions import (
     DatabaseBusyError,
-    DuplicateBarcodeError,
-    DuplicateTrackingNumberError,
+    DuplicateShipmentNumberError,
     InvalidShipmentQueryError,
     ShipmentConflictError,
     ShipmentProblemOpenError,
 )
-from warehouse_control_center.domain.normalization import (
-    normalize_barcode,
-    normalize_tracking_number,
-)
+from warehouse_control_center.domain.normalization import normalize_shipment_number
 from warehouse_control_center.infrastructure.database.models import (
     ShipmentModel,
     ShipmentProblemModel,
@@ -39,7 +35,7 @@ from warehouse_control_center.infrastructure.database.repositories.mapping impor
 )
 
 _SORT_COLUMNS = {
-    "tracking_number": ShipmentModel.tracking_number_normalized,
+    "shipment_number": ShipmentModel.shipment_number_normalized,
     "recipient_name": ShipmentModel.recipient_name,
     "recipient_city": ShipmentModel.recipient_city,
     "status": ShipmentModel.status,
@@ -92,16 +88,9 @@ class SqlAlchemyShipmentRepository:
         model = self._session.get(ShipmentModel, shipment_id)
         return shipment_to_entity(model) if model is not None else None
 
-    def get_by_normalized_tracking_number(self, tracking_number: str) -> Shipment | None:
+    def get_by_normalized_shipment_number(self, shipment_number: str) -> Shipment | None:
         statement = select(ShipmentModel).where(
-            ShipmentModel.tracking_number_normalized == normalize_tracking_number(tracking_number)
-        )
-        model = self._session.scalar(statement)
-        return shipment_to_entity(model) if model is not None else None
-
-    def get_by_normalized_barcode(self, barcode: str) -> Shipment | None:
-        statement = select(ShipmentModel).where(
-            ShipmentModel.barcode_normalized == normalize_barcode(barcode)
+            ShipmentModel.shipment_number_normalized == normalize_shipment_number(shipment_number)
         )
         model = self._session.scalar(statement)
         return shipment_to_entity(model) if model is not None else None
@@ -131,15 +120,13 @@ class SqlAlchemyShipmentRepository:
             )
         if query.search:
             term = query.search.strip()
-            normalized_tracking = normalize_tracking_number(term)
-            normalized_barcode = normalize_barcode(term)
+            normalized_shipment_number = normalize_shipment_number(term)
             pattern = f"%{_escape_like(term)}%"
             filters.append(
                 or_(
-                    ShipmentModel.tracking_number_normalized.contains(
-                        normalized_tracking, autoescape=True
+                    ShipmentModel.shipment_number_normalized.contains(
+                        normalized_shipment_number, autoescape=True
                     ),
-                    ShipmentModel.barcode_normalized.contains(normalized_barcode, autoescape=True),
                     ShipmentModel.recipient_name.ilike(pattern, escape="\\"),
                     ShipmentModel.recipient_phone.ilike(pattern, escape="\\"),
                     ShipmentModel.recipient_address.ilike(pattern, escape="\\"),
@@ -210,9 +197,7 @@ class SqlAlchemyShipmentRepository:
         except IntegrityError as error:
             detail = str(error).casefold()
             if "shipments.tracking_number_normalized" in detail:
-                raise DuplicateTrackingNumberError("Tracking number is already reserved") from None
-            if "shipments.barcode_normalized" in detail:
-                raise DuplicateBarcodeError("Barcode is already reserved") from None
+                raise DuplicateShipmentNumberError("Shipment number is already reserved") from None
             raise
 
     def _flush(self) -> None:

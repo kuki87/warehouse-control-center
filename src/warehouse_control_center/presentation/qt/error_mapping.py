@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from warehouse_control_center.domain.exceptions import (
     AuthenticationError,
     DatabaseBusyError,
-    DuplicateBarcodeError,
-    DuplicateTrackingNumberError,
+    DuplicateShipmentNumberError,
     DuplicateUserError,
     InvalidCurrentPasswordError,
     InvalidShipmentTransitionError,
@@ -48,10 +47,8 @@ def translate_error(error: BaseException) -> UIError:
         return UIError("Invalid username or password.")
     if isinstance(error, DuplicateUserError):
         return UIError("That username is already reserved.")
-    if isinstance(error, DuplicateTrackingNumberError):
-        return UIError("That tracking number is already reserved.")
-    if isinstance(error, DuplicateBarcodeError):
-        return UIError("That barcode is already reserved.")
+    if isinstance(error, DuplicateShipmentNumberError):
+        return UIError("That shipment number is already reserved.")
     if isinstance(error, ShipmentConflictError):
         return UIError("This shipment was changed by another operation. Refresh and try again.")
     if isinstance(error, ShipmentNotFoundError):

@@ -29,12 +29,10 @@ def make_courier(code: str = "1878") -> Courier:
 def make_shipment(
     created_by: int,
     *,
-    tracking_number: str = "TRK-100",
-    barcode: str = "BAR-100",
+    shipment_number: str = "SHP-100",
 ) -> Shipment:
     return Shipment(
-        tracking_number=tracking_number,
-        barcode=barcode,
+        shipment_number=shipment_number,
         recipient_name="Željko Šarić",
         recipient_address="Ćirila i Metodija 10",
         recipient_city="Banja Luka",

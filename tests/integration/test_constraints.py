@@ -10,8 +10,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from tests.fixtures.database import make_courier, make_shipment, make_user
 from warehouse_control_center.domain.entities import AuditEvent
 from warehouse_control_center.domain.exceptions import (
-    DuplicateBarcodeError,
-    DuplicateTrackingNumberError,
+    DuplicateShipmentNumberError,
     DuplicateUserError,
 )
 from warehouse_control_center.infrastructure.database.engine import SessionFactory
@@ -67,25 +66,17 @@ def test_equivalent_normalized_courier_codes_collide(session_factory: SessionFac
             unit_of_work.commit()
 
 
-@pytest.mark.parametrize("duplicate_field", ["tracking", "barcode"])
 def test_equivalent_shipment_identifiers_collide(
-    session_factory: SessionFactory, duplicate_field: str
+    session_factory: SessionFactory,
 ) -> None:
     user_id = _create_user(session_factory)
-    first = make_shipment(user_id, tracking_number=" ab 123 ", barcode=" bar 123 ")
+    first = make_shipment(user_id, shipment_number=" ab 123 ")
     with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
         unit_of_work.shipments.add(first)
         unit_of_work.commit()
 
-    second = make_shipment(
-        user_id,
-        tracking_number="AB123" if duplicate_field == "tracking" else "TRK-OTHER",
-        barcode="BAR123" if duplicate_field == "barcode" else "BAR-OTHER",
-    )
-    expected = (
-        DuplicateTrackingNumberError if duplicate_field == "tracking" else DuplicateBarcodeError
-    )
-    with pytest.raises(expected):
+    second = make_shipment(user_id, shipment_number="AB123")
+    with pytest.raises(DuplicateShipmentNumberError):
         with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
             unit_of_work.shipments.add(second)
             unit_of_work.commit()
@@ -110,10 +101,10 @@ def test_invalid_status_is_rejected_by_database(session_factory: SessionFactory)
             session.execute(
                 text(
                     "INSERT INTO shipments "
-                    "(tracking_number, tracking_number_normalized, barcode, barcode_normalized, "
+                    "(tracking_number, tracking_number_normalized, "
                     "recipient_name, recipient_address, recipient_city, recipient_phone, "
                     "sender_name, status, received_at, created_by, version) "
-                    "VALUES ('T1', 'T1', 'B1', 'B1', 'Name', 'Address', 'City', 'Phone', "
+                    "VALUES ('T1', 'T1', 'Name', 'Address', 'City', 'Phone', "
                     "'Sender', 'INVALID', CURRENT_TIMESTAMP, :user_id, 1)"
                 ),
                 {"user_id": user_id},
@@ -131,10 +122,10 @@ def test_version_must_be_positive(
             session.execute(
                 text(
                     "INSERT INTO shipments "
-                    "(tracking_number, tracking_number_normalized, barcode, barcode_normalized, "
+                    "(tracking_number, tracking_number_normalized, "
                     "recipient_name, recipient_address, recipient_city, recipient_phone, "
                     "sender_name, status, received_at, created_by, version) "
-                    "VALUES ('T2', 'T2', 'B2', 'B2', 'Name', 'Address', 'City', 'Phone', "
+                    "VALUES ('T2', 'T2', 'Name', 'Address', 'City', 'Phone', "
                     "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, :invalid_version)"
                 ),
                 {"user_id": user_id, "invalid_version": invalid_version},
@@ -312,7 +303,7 @@ def test_shipment_and_audit_are_atomic_when_audit_fails(
 
     with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
         recovered_shipment = unit_of_work.shipments.add(
-            make_shipment(user_id, tracking_number="RECOVERED", barcode="RECOVERED")
+            make_shipment(user_id, shipment_number="RECOVERED")
         )
         assert recovered_shipment.id is not None
         unit_of_work.audits.add(
@@ -399,16 +390,13 @@ def test_audit_repository_is_append_only(session_factory: SessionFactory) -> Non
 def test_repository_lookups_apply_normalization(session_factory: SessionFactory) -> None:
     user_id = _create_user(session_factory, "Željko")
     with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
-        shipment = unit_of_work.shipments.add(
-            make_shipment(user_id, tracking_number="TR K-900", barcode="BC 900")
-        )
+        shipment = unit_of_work.shipments.add(make_shipment(user_id, shipment_number="SHP 900"))
         unit_of_work.commit()
     assert shipment.id is not None
 
     with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
         assert unit_of_work.users.get_by_normalized_username("  ŽELJKO ") is not None
-        assert unit_of_work.shipments.get_by_normalized_tracking_number("trk-900") is not None
-        assert unit_of_work.shipments.get_by_normalized_barcode("bc900") is not None
+        assert unit_of_work.shipments.get_by_normalized_shipment_number("shp900") is not None
 
 
 def test_archived_identifiers_remain_reserved(session_factory: SessionFactory) -> None:
@@ -423,8 +411,7 @@ def test_archived_identifiers_remain_reserved(session_factory: SessionFactory) -
         persisted_courier = unit_of_work.couriers.add(courier)
         shipment = make_shipment(
             user_id,
-            tracking_number="reserved-tracking",
-            barcode="reserved-barcode",
+            shipment_number="reserved-shipment",
         )
         shipment.archived_at = archived_at
         unit_of_work.shipments.add(shipment)
@@ -438,16 +425,7 @@ def test_archived_identifiers_remain_reserved(session_factory: SessionFactory) -
             "shipment",
             make_shipment(
                 user_id,
-                tracking_number="RESERVED-TRACKING",
-                barcode="different-barcode",
-            ),
-        ),
-        lambda: (
-            "shipment",
-            make_shipment(
-                user_id,
-                tracking_number="different-tracking",
-                barcode="RESERVED-BARCODE",
+                shipment_number="RESERVED-SHIPMENT",
             ),
         ),
     )
@@ -457,8 +435,7 @@ def test_archived_identifiers_remain_reserved(session_factory: SessionFactory) -
             (
                 IntegrityError,
                 DuplicateUserError,
-                DuplicateTrackingNumberError,
-                DuplicateBarcodeError,
+                DuplicateShipmentNumberError,
             )
         ):
             with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:

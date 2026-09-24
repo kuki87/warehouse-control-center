@@ -7,9 +7,8 @@ from datetime import UTC, datetime
 
 from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
 from warehouse_control_center.domain.normalization import (
-    normalize_barcode,
     normalize_courier_code,
-    normalize_tracking_number,
+    normalize_shipment_number,
     normalize_username,
 )
 from warehouse_control_center.domain.shipment_validation import validate_shipment_fields
@@ -68,16 +67,14 @@ class Courier:
 
 @dataclass(slots=True)
 class Shipment:
-    tracking_number: str
-    barcode: str
+    shipment_number: str
     recipient_name: str
     recipient_address: str
     recipient_city: str
     recipient_phone: str
     sender_name: str
     created_by: int
-    tracking_number_normalized: str = ""
-    barcode_normalized: str = ""
+    shipment_number_normalized: str = ""
     courier_id: int | None = None
     status: ShipmentStatus = ShipmentStatus.RECEIVED
     received_at: datetime = field(default_factory=utc_now)
@@ -93,8 +90,7 @@ class Shipment:
 
     def __post_init__(self) -> None:
         validated = validate_shipment_fields(
-            tracking_number=self.tracking_number,
-            barcode=self.barcode,
+            shipment_number=self.shipment_number,
             recipient_name=self.recipient_name,
             recipient_address=self.recipient_address,
             recipient_city=self.recipient_city,
@@ -102,8 +98,7 @@ class Shipment:
             sender_name=self.sender_name,
             notes=self.notes,
         )
-        self.tracking_number = validated.tracking_number
-        self.barcode = validated.barcode
+        self.shipment_number = validated.shipment_number
         self.recipient_name = validated.recipient_name
         self.recipient_address = validated.recipient_address
         self.recipient_city = validated.recipient_city
@@ -114,8 +109,7 @@ class Shipment:
             raise ValueError("Unsupported shipment status")
         if self.version < 1:
             raise ValueError("Shipment version must be positive")
-        self.tracking_number_normalized = normalize_tracking_number(self.tracking_number)
-        self.barcode_normalized = normalize_barcode(self.barcode)
+        self.shipment_number_normalized = normalize_shipment_number(self.shipment_number)
 
 
 @dataclass(slots=True)

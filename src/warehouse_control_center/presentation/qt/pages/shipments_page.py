@@ -62,8 +62,7 @@ class ShipmentsPage(QWidget):
     session_invalidated = Signal()
 
     _HEADERS = (
-        "Tracking Number",
-        "Barcode",
+        "Shipment Number",
         "Recipient",
         "City",
         "Phone",
@@ -77,7 +76,7 @@ class ShipmentsPage(QWidget):
     _SORTS = (
         ("Received", "received_at"),
         ("Updated", "updated_at"),
-        ("Tracking number", "tracking_number"),
+        ("Shipment number", "shipment_number"),
         ("Recipient", "recipient_name"),
         ("City", "recipient_city"),
         ("Status", "status"),
@@ -212,7 +211,7 @@ class ShipmentsPage(QWidget):
         first = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setObjectName("shipmentSearch")
-        self.search_input.setPlaceholderText("Tracking, barcode, recipient, phone, sender…")
+        self.search_input.setPlaceholderText("Shipment number, recipient, phone, sender…")
         self.search_input.returnPressed.connect(self.apply_filters)
         self.status_input = QComboBox()
         self.status_input.setObjectName("shipmentStatusFilter")
@@ -363,8 +362,7 @@ class ShipmentsPage(QWidget):
         selected_row = -1
         for row, record in enumerate(page.items):
             values = (
-                record.tracking_number,
-                record.barcode,
+                record.shipment_number,
                 record.recipient_name,
                 record.recipient_city,
                 record.recipient_phone,
@@ -441,7 +439,7 @@ class ShipmentsPage(QWidget):
             "create shipment",
             lambda result: (
                 "Shipment created successfully. Shipment number: "
-                f"{cast(ShipmentDTO, result).tracking_number}"
+                f"{cast(ShipmentDTO, result).shipment_number}"
             ),
             dialog,
         )
@@ -632,7 +630,7 @@ class ShipmentsPage(QWidget):
             return
         dialog = ConfirmDialog(
             "Archive shipment",
-            f"Archive shipment {shipment.tracking_number}? It will remain recoverable.",
+            f"Archive shipment {shipment.shipment_number}? It will remain recoverable.",
             destructive=True,
             parent=self,
         )
