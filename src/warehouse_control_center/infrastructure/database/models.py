@@ -17,12 +17,13 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy import (
     Enum as SqlEnum,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from warehouse_control_center.domain.client_validation import (
     CLIENT_ADDRESS_MAX_LENGTH,
@@ -37,12 +38,16 @@ from warehouse_control_center.domain.client_validation import (
     TAX_ID_MAX_LENGTH,
 )
 from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
+    PaymentMethod,
     ProblemType,
+    ShipmentPayer,
     ShipmentStatus,
     UserRole,
     WeightCheckResult,
 )
 from warehouse_control_center.domain.measurements import MAX_STORED_MEASUREMENT
+from warehouse_control_center.domain.payment import MAX_MONEY_FEN
 from warehouse_control_center.domain.shipment_numbering import (
     SHIPMENT_NUMBER_EXHAUSTED_VALUE,
 )
@@ -252,6 +257,21 @@ class ShipmentModel(TimestampMixin, Base):
             name="declared_weight_g_positive",
         ),
         CheckConstraint(
+            f"declared_value_fen IS NULL OR declared_value_fen BETWEEN 0 AND {MAX_MONEY_FEN}",
+            name="declared_value_fen_nonnegative",
+        ),
+        CheckConstraint("cod_enabled IN (0, 1)", name="cod_enabled_boolean"),
+        CheckConstraint(
+            "(cod_enabled = 0 AND cod_amount_fen IS NULL) OR "
+            f"(cod_enabled = 1 AND cod_amount_fen BETWEEN 1 AND {MAX_MONEY_FEN})",
+            name="cod_state_valid",
+        ),
+        CheckConstraint("payer IS NULL OR payer IN ('SENDER', 'RECIPIENT')", name="payer_valid"),
+        CheckConstraint(
+            "payment_method IS NULL OR payment_method IN ('CASH', 'INVOICE', 'ACCOUNT')",
+            name="payment_method_valid",
+        ),
+        CheckConstraint(
             f"length(trim(tracking_number)) >= 1 AND "
             f"length(tracking_number) <= {SHIPMENT_NUMBER_MAX_LENGTH}",
             name="shipment_number_length",
@@ -321,6 +341,33 @@ class ShipmentModel(TimestampMixin, Base):
     width_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     declared_weight_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    declared_value_fen: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cod_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0"), nullable=False
+    )
+    cod_amount_fen: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payer: Mapped[ShipmentPayer | None] = mapped_column(
+        SqlEnum(
+            ShipmentPayer,
+            length=16,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
+    payment_method: Mapped[PaymentMethod | None] = mapped_column(
+        SqlEnum(
+            PaymentMethod,
+            length=16,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=True,
+    )
     courier_id: Mapped[int | None] = mapped_column(
         ForeignKey("couriers.id", ondelete="RESTRICT"), nullable=True
     )
@@ -349,8 +396,45 @@ class ShipmentModel(TimestampMixin, Base):
     version: Mapped[int] = mapped_column(
         Integer, default=1, server_default=text("1"), nullable=False
     )
+    service_rows: Mapped[list[ShipmentServiceModel]] = relationship(
+        back_populates="shipment",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     __mapper_args__ = {"version_id_col": version}
+
+
+class ShipmentServiceModel(Base):
+    __tablename__ = "shipment_services"
+    __table_args__ = (
+        CheckConstraint(
+            "service_type IN ('EXPRESS', 'INSURANCE', 'RETURN_DOCUMENTS', 'SATURDAY_DELIVERY')",
+            name="service_type_valid",
+        ),
+        Index("ix_shipment_services_shipment_id", "shipment_id"),
+        UniqueConstraint("shipment_id", "service_type", name="uq_shipment_services_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(
+        ForeignKey("shipments.id", ondelete="RESTRICT"), nullable=False
+    )
+    service_type: Mapped[AdditionalServiceType] = mapped_column(
+        SqlEnum(
+            AdditionalServiceType,
+            length=32,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=utc_now, server_default=text("CURRENT_TIMESTAMP"), nullable=False
+    )
+    shipment: Mapped[ShipmentModel] = relationship(back_populates="service_rows")
 
 
 class ShipmentStatusHistoryModel(Base):

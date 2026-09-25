@@ -8,7 +8,10 @@ from decimal import Decimal
 
 from warehouse_control_center.domain.client_validation import validate_client_fields
 from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
+    PaymentMethod,
     ProblemType,
+    ShipmentPayer,
     ShipmentStatus,
     UserRole,
     WeightCheckResult,
@@ -24,6 +27,7 @@ from warehouse_control_center.domain.normalization import (
     normalize_shipment_number,
     normalize_username,
 )
+from warehouse_control_center.domain.payment import validate_payment
 from warehouse_control_center.domain.shipment_validation import validate_shipment_fields
 from warehouse_control_center.domain.validation import (
     validate_password_hash,
@@ -134,6 +138,12 @@ class Shipment:
     width_cm: Decimal | None = None
     height_cm: Decimal | None = None
     declared_weight_g: int | None = None
+    declared_value_fen: int | None = None
+    cod_enabled: bool = False
+    cod_amount_fen: int | None = None
+    payer: ShipmentPayer | None = None
+    payment_method: PaymentMethod | None = None
+    services: frozenset[AdditionalServiceType] = field(default_factory=frozenset)
     courier_id: int | None = None
     status: ShipmentStatus = ShipmentStatus.RECEIVED
     received_at: datetime = field(default_factory=utc_now)
@@ -171,6 +181,20 @@ class Shipment:
         self.declared_weight_g = validate_weight_g(
             "Declared weight", self.declared_weight_g, required=False
         )
+        payment = validate_payment(
+            declared_value_fen=self.declared_value_fen,
+            cod_enabled=self.cod_enabled,
+            cod_amount_fen=self.cod_amount_fen,
+            payer=self.payer,
+            payment_method=self.payment_method,
+            services=self.services,
+        )
+        self.declared_value_fen = payment.declared_value_fen
+        self.cod_enabled = payment.cod_enabled
+        self.cod_amount_fen = payment.cod_amount_fen
+        self.payer = payment.payer
+        self.payment_method = payment.payment_method
+        self.services = payment.services
         if not isinstance(self.status, ShipmentStatus):
             raise ValueError("Unsupported shipment status")
         if self.version < 1:

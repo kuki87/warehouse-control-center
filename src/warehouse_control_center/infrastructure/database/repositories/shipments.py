@@ -25,6 +25,7 @@ from warehouse_control_center.domain.normalization import normalize_shipment_num
 from warehouse_control_center.infrastructure.database.models import (
     ShipmentModel,
     ShipmentProblemModel,
+    ShipmentServiceModel,
     ShipmentStatusHistoryModel,
     ShipmentWeightCheckModel,
 )
@@ -78,6 +79,17 @@ class SqlAlchemyShipmentRepository:
         model.width_mm = dimension_cm_to_mm(shipment.width_cm)
         model.height_mm = dimension_cm_to_mm(shipment.height_cm)
         model.declared_weight_g = shipment.declared_weight_g
+        model.declared_value_fen = shipment.declared_value_fen
+        model.cod_enabled = shipment.cod_enabled
+        model.cod_amount_fen = shipment.cod_amount_fen
+        model.payer = shipment.payer
+        model.payment_method = shipment.payment_method
+        existing_services = {row.service_type: row for row in model.service_rows}
+        model.service_rows[:] = [
+            existing_services.get(service)
+            or ShipmentServiceModel(service_type=service, created_at=shipment.updated_at)
+            for service in sorted(shipment.services, key=lambda item: item.value)
+        ]
         model.status = shipment.status
         model.received_at = shipment.received_at
         model.sorted_at = shipment.sorted_at

@@ -33,6 +33,24 @@ class WeightCheckResult(StrEnum):
     OVER_TOLERANCE = "OVER_TOLERANCE"
 
 
+class ShipmentPayer(StrEnum):
+    SENDER = "SENDER"
+    RECIPIENT = "RECIPIENT"
+
+
+class PaymentMethod(StrEnum):
+    CASH = "CASH"
+    INVOICE = "INVOICE"
+    ACCOUNT = "ACCOUNT"
+
+
+class AdditionalServiceType(StrEnum):
+    EXPRESS = "EXPRESS"
+    INSURANCE = "INSURANCE"
+    RETURN_DOCUMENTS = "RETURN_DOCUMENTS"
+    SATURDAY_DELIVERY = "SATURDAY_DELIVERY"
+
+
 class Permission(StrEnum):
     VIEW_SHIPMENTS = "VIEW_SHIPMENTS"
     CREATE_SHIPMENT = "CREATE_SHIPMENT"

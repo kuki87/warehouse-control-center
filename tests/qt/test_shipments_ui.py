@@ -21,7 +21,14 @@ from warehouse_control_center.application.dto import (
     ShipmentStatusChangeResult,
     ShipmentStatusHistoryDTO,
 )
-from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus, UserRole
+from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
+    PaymentMethod,
+    ProblemType,
+    ShipmentPayer,
+    ShipmentStatus,
+    UserRole,
+)
 from warehouse_control_center.domain.exceptions import (
     InvalidShipmentError,
     InvalidShipmentTransitionError,
@@ -138,7 +145,17 @@ class FakeShipmentService:
         created = replace(
             _shipment(),
             shipment_number="E000000123",
+            sender_name=cast(str, kwargs["sender_name"]),
             recipient_name=cast(str, kwargs["recipient_name"]),
+            recipient_address=cast(str, kwargs["recipient_address"]),
+            recipient_city=cast(str, kwargs["recipient_city"]),
+            recipient_phone=cast(str, kwargs["recipient_phone"]),
+            declared_value_fen=cast(int | None, kwargs.get("declared_value_fen")),
+            cod_enabled=cast(bool, kwargs.get("cod_enabled", False)),
+            cod_amount_fen=cast(int | None, kwargs.get("cod_amount_fen")),
+            payer=cast(ShipmentPayer | None, kwargs.get("payer")),
+            payment_method=cast(PaymentMethod | None, kwargs.get("payment_method")),
+            services=cast(tuple[AdditionalServiceType, ...], kwargs.get("services", ())),
         )
         self.records = [created]
         return created
@@ -157,6 +174,20 @@ class FakeShipmentService:
             recipient_phone=cast(str, kwargs["recipient_phone"]),
             sender_name=cast(str, kwargs["sender_name"]),
             notes=cast(str | None, kwargs["notes"]),
+            declared_value_fen=cast(
+                int | None, kwargs.get("declared_value_fen", record.declared_value_fen)
+            ),
+            cod_enabled=cast(bool, kwargs.get("cod_enabled", record.cod_enabled)),
+            cod_amount_fen=cast(int | None, kwargs.get("cod_amount_fen", record.cod_amount_fen)),
+            payer=cast(ShipmentPayer | None, kwargs.get("payer", record.payer)),
+            payment_method=cast(
+                PaymentMethod | None,
+                kwargs.get("payment_method", record.payment_method),
+            ),
+            services=cast(
+                tuple[AdditionalServiceType, ...],
+                kwargs.get("services", record.services),
+            ),
             version=record.version + 1,
         )
         self.records = [updated]

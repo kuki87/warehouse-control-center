@@ -33,7 +33,14 @@ from warehouse_control_center.application.dto import (
 )
 from warehouse_control_center.application.permissions import has_permission
 from warehouse_control_center.application.services import ClientService, ShipmentService
-from warehouse_control_center.domain.enums import Permission, ProblemType, ShipmentStatus
+from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
+    PaymentMethod,
+    Permission,
+    ProblemType,
+    ShipmentPayer,
+    ShipmentStatus,
+)
 from warehouse_control_center.domain.shipment_workflow import can_transition
 from warehouse_control_center.presentation.qt.dialogs.confirm_dialog import ConfirmDialog
 from warehouse_control_center.presentation.qt.dialogs.shipment_dialogs import (
@@ -474,6 +481,12 @@ class ShipmentsPage(QWidget):
                 width_cm=cast(str | None, fields["width_cm"]),
                 height_cm=cast(str | None, fields["height_cm"]),
                 declared_weight_g=cast(int | None, fields["declared_weight_g"]),
+                declared_value_fen=cast(int | None, fields["declared_value_fen"]),
+                cod_enabled=cast(bool, fields["cod_enabled"]),
+                cod_amount_fen=cast(int | None, fields["cod_amount_fen"]),
+                payer=cast(ShipmentPayer | None, fields["payer"]),
+                payment_method=cast(PaymentMethod | None, fields["payment_method"]),
+                services=cast(tuple[AdditionalServiceType, ...], fields["services"]),
                 notes=cast(str | None, fields["notes"]),
             ),
             "create shipment",
@@ -494,7 +507,7 @@ class ShipmentsPage(QWidget):
         dialog.open()
 
     def _update(self, dialog: EditShipmentDialog, shipment: ShipmentDTO, values: object) -> None:
-        fields = cast(dict[str, str | None], values)
+        fields = cast(dict[str, object], values)
         dialog.set_busy(True)
         self._mutate(
             lambda: self._shipments.update_shipment(
@@ -506,7 +519,13 @@ class ShipmentsPage(QWidget):
                 recipient_phone=cast(str, fields["recipient_phone"]),
                 recipient_address=cast(str, fields["recipient_address"]),
                 recipient_city=cast(str, fields["recipient_city"]),
-                notes=fields["notes"],
+                notes=cast(str | None, fields["notes"]),
+                declared_value_fen=cast(int | None, fields["declared_value_fen"]),
+                cod_enabled=cast(bool, fields["cod_enabled"]),
+                cod_amount_fen=cast(int | None, fields["cod_amount_fen"]),
+                payer=cast(ShipmentPayer | None, fields["payer"]),
+                payment_method=cast(PaymentMethod | None, fields["payment_method"]),
+                services=cast(tuple[AdditionalServiceType, ...], fields["services"]),
             ),
             "update shipment",
             "Shipment updated successfully.",

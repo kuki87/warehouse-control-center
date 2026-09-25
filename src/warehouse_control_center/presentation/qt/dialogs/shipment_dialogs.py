@@ -32,7 +32,15 @@ from warehouse_control_center.application.dto import (
     ShipmentStatusHistoryDTO,
     ShipmentWeightCheckDTO,
 )
-from warehouse_control_center.domain.enums import ProblemType, ShipmentStatus
+from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
+    PaymentMethod,
+    ProblemType,
+    ShipmentPayer,
+    ShipmentStatus,
+)
+from warehouse_control_center.domain.exceptions import InvalidShipmentError
+from warehouse_control_center.domain.payment import bam_to_fen, fen_to_bam, validate_payment
 from warehouse_control_center.domain.shipment_workflow import can_recover, can_transition
 from warehouse_control_center.presentation.qt.shipment_formatting import (
     display_enum,
@@ -72,6 +80,122 @@ def _kilograms_to_grams(value: str, label: str) -> int | None:
     return int(grams)
 
 
+def _money_text(value: int | None) -> str:
+    amount = fen_to_bam(value)
+    return f"{amount:.2f} BAM" if amount is not None else "—"
+
+
+class PaymentFields(QWidget):
+    def __init__(self, shipment: ShipmentDTO | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        form = QFormLayout(self)
+        form.setSpacing(11)
+        self.declared_value_input = _line("shipmentDeclaredValueBam")
+        self.declared_value_input.setPlaceholderText("BAM")
+        self.cod_enabled_input = QCheckBox("Cash on delivery")
+        self.cod_enabled_input.setObjectName("shipmentCodEnabled")
+        self.cod_amount_input = _line("shipmentCodAmountBam")
+        self.cod_amount_input.setPlaceholderText("BAM")
+        self.payer_input = QComboBox()
+        self.payer_input.setObjectName("shipmentPayer")
+        self.payer_input.addItem("Not specified", None)
+        for payer in ShipmentPayer:
+            self.payer_input.addItem(display_enum(payer.value), payer.value)
+        self.payment_method_input = QComboBox()
+        self.payment_method_input.setObjectName("shipmentPaymentMethod")
+        self.payment_method_input.addItem("Not specified", None)
+        for method in PaymentMethod:
+            self.payment_method_input.addItem(display_enum(method.value), method.value)
+        form.addRow("Declared value", self.declared_value_input)
+        form.addRow("COD", self.cod_enabled_input)
+        form.addRow("COD amount", self.cod_amount_input)
+        form.addRow("Payer", self.payer_input)
+        form.addRow("Payment method", self.payment_method_input)
+        self.service_inputs: dict[AdditionalServiceType, QCheckBox] = {}
+        services = QWidget()
+        services_layout = QVBoxLayout(services)
+        services_layout.setContentsMargins(0, 0, 0, 0)
+        for service in AdditionalServiceType:
+            checkbox = QCheckBox(display_enum(service.value))
+            checkbox.setObjectName(f"shipmentService{service.value.title().replace('_', '')}")
+            self.service_inputs[service] = checkbox
+            services_layout.addWidget(checkbox)
+        form.addRow("Additional services", services)
+        self.cod_enabled_input.toggled.connect(self._cod_toggled)
+        if shipment is not None:
+            self._populate(shipment)
+        self._cod_toggled(self.cod_enabled_input.isChecked())
+
+    def _populate(self, shipment: ShipmentDTO) -> None:
+        declared = fen_to_bam(shipment.declared_value_fen)
+        cod = fen_to_bam(shipment.cod_amount_fen)
+        self.declared_value_input.setText(f"{declared:.2f}" if declared is not None else "")
+        self.cod_enabled_input.setChecked(shipment.cod_enabled)
+        self.cod_amount_input.setText(f"{cod:.2f}" if cod is not None else "")
+        if shipment.payer is not None:
+            self.payer_input.setCurrentIndex(self.payer_input.findData(shipment.payer.value))
+        if shipment.payment_method is not None:
+            self.payment_method_input.setCurrentIndex(
+                self.payment_method_input.findData(shipment.payment_method.value)
+            )
+        for service in shipment.services:
+            self.service_inputs[service].setChecked(True)
+
+    def _cod_toggled(self, checked: bool) -> None:
+        self.cod_amount_input.setEnabled(checked)
+        if not checked:
+            self.cod_amount_input.clear()
+
+    def values(self) -> dict[str, object]:
+        try:
+            payer_data = self.payer_input.currentData()
+            method_data = self.payment_method_input.currentData()
+            payer = ShipmentPayer(payer_data) if payer_data else None
+            payment_method = PaymentMethod(method_data) if method_data else None
+            services = tuple(
+                service for service, checkbox in self.service_inputs.items() if checkbox.isChecked()
+            )
+            payment = validate_payment(
+                declared_value_fen=bam_to_fen(
+                    self.declared_value_input.text().strip() or None,
+                    "Declared value",
+                    allow_zero=True,
+                ),
+                cod_enabled=self.cod_enabled_input.isChecked(),
+                cod_amount_fen=bam_to_fen(
+                    self.cod_amount_input.text().strip() or None,
+                    "COD amount",
+                    allow_zero=False,
+                ),
+                payer=payer,
+                payment_method=payment_method,
+                services=services,
+            )
+        except (ValueError, InvalidShipmentError) as error:
+            raise ValueError(str(error)) from None
+        return {
+            "declared_value_fen": payment.declared_value_fen,
+            "cod_enabled": payment.cod_enabled,
+            "cod_amount_fen": payment.cod_amount_fen,
+            "payer": payment.payer,
+            "payment_method": payment.payment_method,
+            "services": tuple(sorted(payment.services, key=lambda item: item.value)),
+        }
+
+    def set_busy(self, busy: bool) -> None:
+        for widget in (
+            self.declared_value_input,
+            self.cod_enabled_input,
+            self.cod_amount_input,
+            self.payer_input,
+            self.payment_method_input,
+            *self.service_inputs.values(),
+        ):
+            widget.setEnabled(not busy)
+        if not busy:
+            self._cod_toggled(self.cod_enabled_input.isChecked())
+
+
 class NewShipmentDialog(QDialog):
     create_requested = Signal(object)
 
@@ -90,7 +214,8 @@ class NewShipmentDialog(QDialog):
         title = QLabel("New shipment")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
-        form = QFormLayout()
+        main_tab = QWidget()
+        form = QFormLayout(main_tab)
         form.setSpacing(11)
         number_note = QLabel("Shipment number will be generated automatically.")
         number_note.setObjectName("shipmentNumberNote")
@@ -143,7 +268,12 @@ class NewShipmentDialog(QDialog):
             ("Notes", self.notes_input),
         ):
             form.addRow(label, field)
-        layout.addLayout(form)
+        self.payment_fields = PaymentFields()
+        tabs = QTabWidget()
+        tabs.setObjectName("newShipmentTabs")
+        tabs.addTab(main_tab, "Shipment")
+        tabs.addTab(self.payment_fields, "Payment & Services")
+        layout.addWidget(tabs)
         self.status = StatusBanner()
         layout.addWidget(self.status)
         self.create_button = QPushButton("Create shipment")
@@ -188,6 +318,7 @@ class NewShipmentDialog(QDialog):
                 self.declared_weight_input.text(), "Declared weight"
             ),
             "notes": notes if notes.strip() else None,
+            **self.payment_fields.values(),
         }
 
     def _client_changed(self) -> None:
@@ -214,6 +345,7 @@ class NewShipmentDialog(QDialog):
         ):
             field.setEnabled(not busy)
         self.create_button.setEnabled(not busy)
+        self.payment_fields.set_busy(busy)
         self.create_button.setText("Creating…" if busy else "Create shipment")
 
     def show_error(self, message: str) -> None:
@@ -295,7 +427,8 @@ class EditShipmentDialog(QDialog):
         title = QLabel(f"Edit {shipment.shipment_number}")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
-        form = QFormLayout()
+        main_tab = QWidget()
+        form = QFormLayout(main_tab)
         form.setSpacing(11)
         self.sender_input = _line("editShipmentSender")
         self.recipient_input = _line("editShipmentRecipient")
@@ -320,7 +453,12 @@ class EditShipmentDialog(QDialog):
             ("Notes", self.notes_input),
         ):
             form.addRow(label, field)
-        layout.addLayout(form)
+        self.payment_fields = PaymentFields(shipment)
+        tabs = QTabWidget()
+        tabs.setObjectName("editShipmentTabs")
+        tabs.addTab(main_tab, "Shipment")
+        tabs.addTab(self.payment_fields, "Payment & Services")
+        layout.addWidget(tabs)
         self.status = StatusBanner()
         layout.addWidget(self.status)
         self.save_button = QPushButton("Save changes")
@@ -329,7 +467,11 @@ class EditShipmentDialog(QDialog):
         layout.addLayout(_dialog_actions(self, self.save_button))
 
     def _submit(self) -> None:
-        values = self.values()
+        try:
+            values = self.values()
+        except ValueError as error:
+            self.status.show_message(str(error))
+            return
         required = (
             "sender_name",
             "recipient_name",
@@ -343,7 +485,7 @@ class EditShipmentDialog(QDialog):
         self.status.clear()
         self.update_requested.emit(values)
 
-    def values(self) -> dict[str, str | None]:
+    def values(self) -> dict[str, object]:
         notes = self.notes_input.toPlainText()
         return {
             "sender_name": self.sender_input.text(),
@@ -352,6 +494,7 @@ class EditShipmentDialog(QDialog):
             "recipient_address": self.address_input.text(),
             "recipient_city": self.city_input.text(),
             "notes": notes if notes.strip() else None,
+            **self.payment_fields.values(),
         }
 
     def set_busy(self, busy: bool) -> None:
@@ -365,6 +508,7 @@ class EditShipmentDialog(QDialog):
         ):
             field.setEnabled(not busy)
         self.save_button.setEnabled(not busy)
+        self.payment_fields.set_busy(busy)
         self.save_button.setText("Saving…" if busy else "Save changes")
 
     def show_error(self, message: str) -> None:
@@ -607,6 +751,8 @@ class ShipmentDetailsDialog(QDialog):
         tabs = QTabWidget()
         tabs.setObjectName("shipmentDetailsTabs")
         tabs.addTab(self._details_tab(shipment, timezone_name), "Details")
+        if self._has_payment_details(shipment):
+            tabs.addTab(self._payment_tab(shipment), "Payment & Services")
         tabs.addTab(self._history_tab(details.history, timezone_name), "History")
         tabs.addTab(self._problem_tab(details.problem, timezone_name), "Problem")
         tabs.addTab(
@@ -652,6 +798,51 @@ class ShipmentDetailsDialog(QDialog):
             ("Updated", display_timestamp(shipment.updated_at, timezone_name)),
             ("Archived", display_timestamp(shipment.archived_at, timezone_name)),
         )
+        for label, value in values:
+            text = QLabel(value)
+            text.setWordWrap(True)
+            text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            form.addRow(label, text)
+        return tab
+
+    @staticmethod
+    def _has_payment_details(shipment: ShipmentDTO) -> bool:
+        return any(
+            (
+                shipment.declared_value_fen is not None,
+                shipment.cod_enabled,
+                shipment.payer is not None,
+                shipment.payment_method is not None,
+                bool(shipment.services),
+            )
+        )
+
+    @staticmethod
+    def _payment_tab(shipment: ShipmentDTO) -> QWidget:
+        tab = QWidget()
+        tab.setObjectName("shipmentPaymentDetails")
+        form = QFormLayout(tab)
+        values: list[tuple[str, str]] = []
+        if shipment.declared_value_fen is not None:
+            values.append(("Declared value", _money_text(shipment.declared_value_fen)))
+        if shipment.cod_enabled:
+            values.extend(
+                (
+                    ("Cash on delivery", "Yes"),
+                    ("COD amount", _money_text(shipment.cod_amount_fen)),
+                )
+            )
+        if shipment.payer is not None:
+            values.append(("Payer", display_enum(shipment.payer.value)))
+        if shipment.payment_method is not None:
+            values.append(("Payment method", display_enum(shipment.payment_method.value)))
+        if shipment.services:
+            values.append(
+                (
+                    "Additional services",
+                    ", ".join(display_enum(service.value) for service in shipment.services),
+                )
+            )
         for label, value in values:
             text = QLabel(value)
             text.setWordWrap(True)

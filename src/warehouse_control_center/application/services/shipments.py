@@ -34,9 +34,12 @@ from warehouse_control_center.domain.entities import (
     User,
 )
 from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
     AuditAction,
+    PaymentMethod,
     Permission,
     ProblemType,
+    ShipmentPayer,
     ShipmentStatus,
 )
 from warehouse_control_center.domain.exceptions import (
@@ -59,6 +62,7 @@ from warehouse_control_center.domain.measurements import (
     validate_package_count,
     validate_weight_g,
 )
+from warehouse_control_center.domain.payment import validate_payment
 from warehouse_control_center.domain.shipment_validation import (
     validate_optional_city,
     validate_problem,
@@ -89,6 +93,13 @@ _SORT_FIELDS = frozenset(
 _SORT_DIRECTIONS = frozenset({"asc", "desc"})
 
 
+class _Unchanged:
+    pass
+
+
+_UNCHANGED = _Unchanged()
+
+
 class ShipmentService:
     """Shipment use cases; creation intentionally starts history at the first transition."""
 
@@ -117,6 +128,12 @@ class ShipmentService:
         width_cm: Decimal | str | int | None = None,
         height_cm: Decimal | str | int | None = None,
         declared_weight_g: int | None = None,
+        declared_value_fen: int | None = None,
+        cod_enabled: bool = False,
+        cod_amount_fen: int | None = None,
+        payer: ShipmentPayer | None = None,
+        payment_method: PaymentMethod | None = None,
+        services: tuple[AdditionalServiceType, ...] = (),
         notes: str | None = None,
     ) -> ShipmentDTO:
         validated_package_count = validate_package_count(package_count)
@@ -124,6 +141,14 @@ class ShipmentService:
         validated_width = validate_dimension_cm("Width", width_cm)
         validated_height = validate_dimension_cm("Height", height_cm)
         validated_weight = validate_weight_g("Declared weight", declared_weight_g, required=False)
+        payment = validate_payment(
+            declared_value_fen=declared_value_fen,
+            cod_enabled=cod_enabled,
+            cod_amount_fen=cod_amount_fen,
+            payer=payer,
+            payment_method=payment_method,
+            services=services,
+        )
         if sender_client_id is not None and (
             isinstance(sender_client_id, bool)
             or not isinstance(sender_client_id, int)
@@ -167,6 +192,12 @@ class ShipmentService:
                         width_cm=validated_width,
                         height_cm=validated_height,
                         declared_weight_g=validated_weight,
+                        declared_value_fen=payment.declared_value_fen,
+                        cod_enabled=payment.cod_enabled,
+                        cod_amount_fen=payment.cod_amount_fen,
+                        payer=payment.payer,
+                        payment_method=payment.payment_method,
+                        services=payment.services,
                         notes=fields.notes,
                         created_by=_persisted_id(actor),
                         status=ShipmentStatus.RECEIVED,
@@ -186,7 +217,10 @@ class ShipmentService:
                     actor,
                     shipment,
                     now,
-                    details={"shipment_number": shipment.shipment_number},
+                    details={
+                        "shipment_number": shipment.shipment_number,
+                        **_payment_audit_details(shipment),
+                    },
                 )
             )
             uow.commit()
@@ -263,6 +297,12 @@ class ShipmentService:
         recipient_phone: str,
         sender_name: str,
         notes: str | None,
+        declared_value_fen: int | None | _Unchanged = _UNCHANGED,
+        cod_enabled: bool | _Unchanged = _UNCHANGED,
+        cod_amount_fen: int | None | _Unchanged = _UNCHANGED,
+        payer: ShipmentPayer | None | _Unchanged = _UNCHANGED,
+        payment_method: PaymentMethod | None | _Unchanged = _UNCHANGED,
+        services: tuple[AdditionalServiceType, ...] | _Unchanged = _UNCHANGED,
     ) -> ShipmentDTO:
         _require_version(expected_version)
         with self._uow_factory() as uow:
@@ -279,12 +319,40 @@ class ShipmentService:
                 sender_name=sender_name,
                 notes=notes,
             )
+            payment = validate_payment(
+                declared_value_fen=(
+                    shipment.declared_value_fen
+                    if isinstance(declared_value_fen, _Unchanged)
+                    else declared_value_fen
+                ),
+                cod_enabled=(
+                    shipment.cod_enabled if isinstance(cod_enabled, _Unchanged) else cod_enabled
+                ),
+                cod_amount_fen=(
+                    shipment.cod_amount_fen
+                    if isinstance(cod_amount_fen, _Unchanged)
+                    else cod_amount_fen
+                ),
+                payer=shipment.payer if isinstance(payer, _Unchanged) else payer,
+                payment_method=(
+                    shipment.payment_method
+                    if isinstance(payment_method, _Unchanged)
+                    else payment_method
+                ),
+                services=shipment.services if isinstance(services, _Unchanged) else services,
+            )
             shipment.recipient_name = fields.recipient_name
             shipment.recipient_address = fields.recipient_address
             shipment.recipient_city = fields.recipient_city
             shipment.recipient_phone = fields.recipient_phone
             shipment.sender_name = fields.sender_name
             shipment.notes = fields.notes
+            shipment.declared_value_fen = payment.declared_value_fen
+            shipment.cod_enabled = payment.cod_enabled
+            shipment.cod_amount_fen = payment.cod_amount_fen
+            shipment.payer = payment.payer
+            shipment.payment_method = payment.payment_method
+            shipment.services = payment.services
             now = utc_timestamp(self._clock.now())
             shipment.updated_at = now
             saved = uow.shipments.save(shipment)
@@ -303,7 +371,10 @@ class ShipmentService:
                             "recipient_phone",
                             "sender_name",
                             "notes",
+                            "payment",
+                            "services",
                         ],
+                        **_payment_audit_details(saved),
                     },
                 )
             )
@@ -701,6 +772,19 @@ def _shipment_audit(
         timestamp=timestamp,
         details=details,
     )
+
+
+def _payment_audit_details(shipment: Shipment) -> dict[str, object]:
+    return {
+        "cod_enabled": shipment.cod_enabled,
+        "cod_amount_fen": shipment.cod_amount_fen,
+        "declared_value_fen": shipment.declared_value_fen,
+        "payer": shipment.payer.value if shipment.payer is not None else None,
+        "payment_method": (
+            shipment.payment_method.value if shipment.payment_method is not None else None
+        ),
+        "services": sorted(service.value for service in shipment.services),
+    }
 
 
 def _validate_pagination(page: int, page_size: int) -> None:

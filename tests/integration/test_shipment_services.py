@@ -88,7 +88,15 @@ def test_create_shipment_sets_received_state_and_atomic_audit(
         )
         assert event is not None
         assert event.entity_type == "SHIPMENT"
-        assert event.details_json == {"shipment_number": shipment.shipment_number}
+        assert event.details_json == {
+            "shipment_number": shipment.shipment_number,
+            "cod_enabled": False,
+            "cod_amount_fen": None,
+            "declared_value_fen": None,
+            "payer": None,
+            "payment_method": None,
+            "services": [],
+        }
 
 
 def test_creation_allocates_sequential_shipment_numbers(

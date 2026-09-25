@@ -16,7 +16,10 @@ from warehouse_control_center.domain.entities import (
     User,
 )
 from warehouse_control_center.domain.enums import (
+    AdditionalServiceType,
+    PaymentMethod,
     ProblemType,
+    ShipmentPayer,
     ShipmentStatus,
     UserRole,
     WeightCheckResult,
@@ -135,6 +138,12 @@ class ShipmentDTO:
     notes: str | None
     archived_at: datetime | None
     version: int
+    declared_value_fen: int | None = None
+    cod_enabled: bool = False
+    cod_amount_fen: int | None = None
+    payer: ShipmentPayer | None = None
+    payment_method: PaymentMethod | None = None
+    services: tuple[AdditionalServiceType, ...] = ()
 
     @classmethod
     def from_entity(cls, shipment: Shipment) -> ShipmentDTO:
@@ -154,6 +163,12 @@ class ShipmentDTO:
             width_cm=shipment.width_cm,
             height_cm=shipment.height_cm,
             declared_weight_g=shipment.declared_weight_g,
+            declared_value_fen=shipment.declared_value_fen,
+            cod_enabled=shipment.cod_enabled,
+            cod_amount_fen=shipment.cod_amount_fen,
+            payer=shipment.payer,
+            payment_method=shipment.payment_method,
+            services=tuple(sorted(shipment.services, key=lambda item: item.value)),
             courier_id=shipment.courier_id,
             status=shipment.status,
             received_at=shipment.received_at,
