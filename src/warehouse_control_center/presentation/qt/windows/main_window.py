@@ -10,12 +10,14 @@ from warehouse_control_center.application.dto import SessionContext
 from warehouse_control_center.application.services import (
     ClientService,
     ShipmentService,
+    ShipmentSmsService,
     UserService,
 )
 from warehouse_control_center.presentation.qt.pages import (
     ClientsPage,
     PlaceholderPage,
     ShipmentsPage,
+    SmsShipmentsPage,
     UsersPage,
 )
 from warehouse_control_center.presentation.qt.widgets.sidebar import Sidebar
@@ -29,6 +31,7 @@ class MainWindow(QMainWindow):
     _PAGE_TITLES = {
         "dashboard": "Dashboard",
         "shipments": "Shipments",
+        "sms_shipments": "SMS Shipments",
         "clients": "Clients",
         "scan": "Scan",
         "couriers": "Couriers",
@@ -47,6 +50,7 @@ class MainWindow(QMainWindow):
         *,
         shipments: ShipmentService | None = None,
         clients: ClientService | None = None,
+        shipment_sms: ShipmentSmsService | None = None,
         timezone_name: str = "Europe/Sarajevo",
     ) -> None:
         super().__init__(parent)
@@ -81,6 +85,16 @@ class MainWindow(QMainWindow):
                     logger,
                     timezone_name,
                     clients=clients,
+                    shipment_sms=shipment_sms,
+                )
+                page.session_invalidated.connect(self.session_invalidated)
+            elif route == "sms_shipments" and shipment_sms is not None:
+                page = SmsShipmentsPage(
+                    session,
+                    shipment_sms,
+                    thread_pool,
+                    logger,
+                    timezone_name,
                 )
                 page.session_invalidated.connect(self.session_invalidated)
             elif route == "clients" and clients is not None:

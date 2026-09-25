@@ -7,6 +7,7 @@ from warehouse_control_center.application.services.clients import ClientService
 from warehouse_control_center.application.services.first_run import (
     FirstRunAdministratorService,
 )
+from warehouse_control_center.application.services.shipment_sms import ShipmentSmsService
 from warehouse_control_center.application.services.shipments import ShipmentService
 from warehouse_control_center.application.services.users import UserService
 
@@ -15,5 +16,6 @@ __all__ = [
     "ClientService",
     "FirstRunAdministratorService",
     "ShipmentService",
+    "ShipmentSmsService",
     "UserService",
 ]

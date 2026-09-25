@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     "shipment_status_history",
     "shipment_weight_checks",
     "shipment_services",
+    "shipment_sms_events",
     "audit_events",
 }
 
@@ -1096,5 +1097,110 @@ def test_phase4b_downgrade_and_reupgrade_preserve_core_shipment(
                 )
             ).one() == ("E000000778", None, 0, None)
             assert connection.scalar(text("SELECT COUNT(*) FROM shipment_services")) == 0
+    finally:
+        engine.dispose()
+
+
+def test_phase4c_upgrade_preserves_populated_0008_without_fake_events(
+    test_settings: Settings,
+) -> None:
+    test_settings.runtime_paths.create()
+    with alembic_config(test_settings) as config:
+        command.upgrade(config, "0008_shipment_payment_services")
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, recipient_name, "
+                    "recipient_address, recipient_city, recipient_phone, sender_name, status, "
+                    "received_at, created_by, version) "
+                    "VALUES ('E000000901', 'E000000901', 'Name', 'Address', 'City', '123', "
+                    "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1)"
+                ),
+                {"user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        inspector = inspect(engine)
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipments")) == 1
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipment_sms_events")) == 0
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                EXPECTED_SCHEMA_REVISION
+            )
+        foreign_keys = inspector.get_foreign_keys("shipment_sms_events")
+        assert {foreign_key["referred_table"] for foreign_key in foreign_keys} == {
+            "shipments",
+            "users",
+        }
+    finally:
+        engine.dispose()
+
+
+def test_phase4c_downgrade_and_reupgrade_preserve_shipments(
+    test_settings: Settings,
+) -> None:
+    upgrade_to_head(test_settings)
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(username, username_normalized, password_hash, role) "
+                    "VALUES ('operator', 'operator', :password_hash, 'ADMIN') RETURNING id"
+                ),
+                {"password_hash": VALID_HASH},
+            ).scalar_one()
+            shipment_id = connection.execute(
+                text(
+                    "INSERT INTO shipments "
+                    "(tracking_number, tracking_number_normalized, recipient_name, "
+                    "recipient_address, recipient_city, recipient_phone, sender_name, status, "
+                    "received_at, created_by, version) "
+                    "VALUES ('E000000902', 'E000000902', 'Name', 'Address', 'City', '123', "
+                    "'Sender', 'RECEIVED', CURRENT_TIMESTAMP, :user_id, 1) RETURNING id"
+                ),
+                {"user_id": user_id},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO shipment_sms_events "
+                    "(shipment_id, sender_type, sent_by_user_id, phone_number, message_type, "
+                    "message_text, send_status, sent_at) VALUES "
+                    "(:shipment_id, 'WAREHOUSE', :user_id, '123', 'CUSTOM', 'Legacy SMS', "
+                    "'RECORDED', CURRENT_TIMESTAMP)"
+                ),
+                {"shipment_id": shipment_id, "user_id": user_id},
+            )
+    finally:
+        engine.dispose()
+
+    with alembic_config(test_settings) as config:
+        command.downgrade(config, "0008_shipment_payment_services")
+        command.upgrade(config, "head")
+
+    engine = create_engine(test_settings.database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipments")) == 1
+            assert connection.scalar(text("SELECT COUNT(*) FROM shipment_sms_events")) == 0
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+                EXPECTED_SCHEMA_REVISION
+            )
     finally:
         engine.dispose()

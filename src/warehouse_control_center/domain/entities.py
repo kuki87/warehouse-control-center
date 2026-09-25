@@ -13,6 +13,9 @@ from warehouse_control_center.domain.enums import (
     ProblemType,
     ShipmentPayer,
     ShipmentStatus,
+    SmsMessageType,
+    SmsSenderType,
+    SmsSendStatus,
     UserRole,
     WeightCheckResult,
 )
@@ -29,6 +32,7 @@ from warehouse_control_center.domain.normalization import (
 )
 from warehouse_control_center.domain.payment import validate_payment
 from warehouse_control_center.domain.shipment_validation import validate_shipment_fields
+from warehouse_control_center.domain.sms import validate_sms_event
 from warehouse_control_center.domain.validation import (
     validate_password_hash,
     validate_user_role,
@@ -241,6 +245,57 @@ class ShipmentWeightCheck:
     tolerance_percent_snapshot: Decimal | None = None
     note: str | None = None
     id: int | None = None
+
+
+@dataclass(slots=True)
+class ShipmentSmsEvent:
+    shipment_id: int
+    sender_type: SmsSenderType
+    sent_by_user_id: int | None
+    phone_number: str
+    message_type: SmsMessageType
+    message_text: str
+    send_status: SmsSendStatus
+    sent_at: datetime
+    created_at: datetime
+    delivered_at: datetime | None = None
+    provider_message_id: str | None = None
+    error_message: str | None = None
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.shipment_id, bool) or not isinstance(self.shipment_id, int):
+            raise ValueError("SMS shipment id must be an integer")
+        if self.shipment_id < 1:
+            raise ValueError("SMS shipment id must be positive")
+        (
+            self.sender_type,
+            self.sent_by_user_id,
+            self.phone_number,
+            self.message_type,
+            self.message_text,
+            self.send_status,
+            self.provider_message_id,
+            self.error_message,
+        ) = validate_sms_event(
+            sender_type=self.sender_type,
+            sent_by_user_id=self.sent_by_user_id,
+            phone_number=self.phone_number,
+            message_type=self.message_type,
+            message_text=self.message_text,
+            send_status=self.send_status,
+            sent_at=self.sent_at,
+            delivered_at=self.delivered_at,
+            provider_message_id=self.provider_message_id,
+            error_message=self.error_message,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentSmsSummary:
+    shipment: Shipment
+    sms_count: int
+    last_event: ShipmentSmsEvent
 
 
 @dataclass(slots=True)

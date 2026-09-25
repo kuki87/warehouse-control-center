@@ -117,6 +117,10 @@ class InvalidShipmentQueryError(ValidationError):
     """Raised when shipment pagination, filtering, or sorting input is invalid."""
 
 
+class InvalidSmsError(ValidationError):
+    """Raised when shipment SMS data violates the append-only event policy."""
+
+
 class InvalidClientError(ValidationError):
     """Raised when contract-client data violates the centralized policy."""
 

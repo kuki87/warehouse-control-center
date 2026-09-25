@@ -11,6 +11,8 @@ from warehouse_control_center.domain.entities import (
     Client,
     Shipment,
     ShipmentProblem,
+    ShipmentSmsEvent,
+    ShipmentSmsSummary,
     ShipmentStatusHistory,
     ShipmentWeightCheck,
     User,
@@ -21,6 +23,9 @@ from warehouse_control_center.domain.enums import (
     ProblemType,
     ShipmentPayer,
     ShipmentStatus,
+    SmsMessageType,
+    SmsSenderType,
+    SmsSendStatus,
     UserRole,
     WeightCheckResult,
 )
@@ -278,6 +283,74 @@ class ShipmentWeightCheckDTO:
 @dataclass(frozen=True, slots=True)
 class ShipmentPage:
     items: tuple[ShipmentDTO, ...]
+    page: int
+    page_size: int
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentSmsEventDTO:
+    id: int
+    shipment_id: int
+    sender_type: SmsSenderType
+    sent_by_user_id: int | None
+    phone_number: str
+    message_type: SmsMessageType
+    message_text: str
+    send_status: SmsSendStatus
+    sent_at: datetime
+    delivered_at: datetime | None
+    provider_message_id: str | None
+    error_message: str | None
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, event: ShipmentSmsEvent) -> ShipmentSmsEventDTO:
+        if event.id is None:
+            raise ValueError("Persisted SMS event must have an id")
+        return cls(
+            id=event.id,
+            shipment_id=event.shipment_id,
+            sender_type=event.sender_type,
+            sent_by_user_id=event.sent_by_user_id,
+            phone_number=event.phone_number,
+            message_type=event.message_type,
+            message_text=event.message_text,
+            send_status=event.send_status,
+            sent_at=event.sent_at,
+            delivered_at=event.delivered_at,
+            provider_message_id=event.provider_message_id,
+            error_message=event.error_message,
+            created_at=event.created_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentSmsEventPage:
+    items: tuple[ShipmentSmsEventDTO, ...]
+    page: int
+    page_size: int
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentSmsSummaryDTO:
+    shipment: ShipmentDTO
+    sms_count: int
+    last_event: ShipmentSmsEventDTO
+
+    @classmethod
+    def from_entity(cls, summary: ShipmentSmsSummary) -> ShipmentSmsSummaryDTO:
+        return cls(
+            shipment=ShipmentDTO.from_entity(summary.shipment),
+            sms_count=summary.sms_count,
+            last_event=ShipmentSmsEventDTO.from_entity(summary.last_event),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentSmsSummaryPage:
+    items: tuple[ShipmentSmsSummaryDTO, ...]
     page: int
     page_size: int
     total: int

@@ -6,6 +6,7 @@ from warehouse_control_center.domain.entities import (
     Courier,
     Shipment,
     ShipmentProblem,
+    ShipmentSmsEvent,
     ShipmentStatusHistory,
     ShipmentWeightCheck,
     User,
@@ -21,6 +22,7 @@ from warehouse_control_center.infrastructure.database.models import (
     ShipmentModel,
     ShipmentProblemModel,
     ShipmentServiceModel,
+    ShipmentSmsEventModel,
     ShipmentStatusHistoryModel,
     ShipmentWeightCheckModel,
     UserModel,
@@ -297,6 +299,42 @@ def weight_check_to_entity(model: ShipmentWeightCheckModel) -> ShipmentWeightChe
         checked_by_user_id=model.checked_by_user_id,
         checked_at=model.checked_at,
         note=model.note,
+    )
+
+
+def sms_event_to_model(event: ShipmentSmsEvent) -> ShipmentSmsEventModel:
+    return ShipmentSmsEventModel(
+        id=event.id,
+        shipment_id=event.shipment_id,
+        sender_type=event.sender_type,
+        sent_by_user_id=event.sent_by_user_id,
+        phone_number=event.phone_number,
+        message_type=event.message_type,
+        message_text=event.message_text,
+        send_status=event.send_status,
+        sent_at=event.sent_at,
+        delivered_at=event.delivered_at,
+        provider_message_id=event.provider_message_id,
+        error_message=event.error_message,
+        created_at=event.created_at,
+    )
+
+
+def sms_event_to_entity(model: ShipmentSmsEventModel) -> ShipmentSmsEvent:
+    return ShipmentSmsEvent(
+        id=model.id,
+        shipment_id=model.shipment_id,
+        sender_type=model.sender_type,
+        sent_by_user_id=model.sent_by_user_id,
+        phone_number=model.phone_number,
+        message_type=model.message_type,
+        message_text=model.message_text,
+        send_status=model.send_status,
+        sent_at=model.sent_at,
+        delivered_at=model.delivered_at,
+        provider_message_id=model.provider_message_id,
+        error_message=model.error_message,
+        created_at=model.created_at,
     )
 
 

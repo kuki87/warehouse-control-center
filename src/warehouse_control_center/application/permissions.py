@@ -17,6 +17,8 @@ _OPERATOR_PERMISSIONS = frozenset(
         Permission.VIEW_COURIERS,
         Permission.VIEW_CLIENTS,
         Permission.CONTROL_WEIGHT_SHIPMENT,
+        Permission.VIEW_SHIPMENT_SMS,
+        Permission.RECORD_SHIPMENT_SMS,
     }
 )
 
@@ -41,6 +43,8 @@ _ADMIN_PERMISSIONS = frozenset(
         Permission.VIEW_CLIENTS,
         Permission.MANAGE_CLIENTS,
         Permission.CONTROL_WEIGHT_SHIPMENT,
+        Permission.VIEW_SHIPMENT_SMS,
+        Permission.RECORD_SHIPMENT_SMS,
         Permission.VIEW_AUDIT_LOG,
         Permission.MANAGE_USERS,
         Permission.MANAGE_SETTINGS,

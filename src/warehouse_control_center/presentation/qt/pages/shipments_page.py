@@ -30,9 +30,14 @@ from warehouse_control_center.application.dto import (
     ShipmentDTO,
     ShipmentPage,
     ShipmentProblemDTO,
+    ShipmentSmsEventDTO,
 )
 from warehouse_control_center.application.permissions import has_permission
-from warehouse_control_center.application.services import ClientService, ShipmentService
+from warehouse_control_center.application.services import (
+    ClientService,
+    ShipmentService,
+    ShipmentSmsService,
+)
 from warehouse_control_center.domain.enums import (
     AdditionalServiceType,
     PaymentMethod,
@@ -40,6 +45,9 @@ from warehouse_control_center.domain.enums import (
     ProblemType,
     ShipmentPayer,
     ShipmentStatus,
+    SmsMessageType,
+    SmsSenderType,
+    SmsSendStatus,
 )
 from warehouse_control_center.domain.shipment_workflow import can_transition
 from warehouse_control_center.presentation.qt.dialogs.confirm_dialog import ConfirmDialog
@@ -53,6 +61,7 @@ from warehouse_control_center.presentation.qt.dialogs.shipment_dialogs import (
     ShipmentDetailsData,
     ShipmentDetailsDialog,
 )
+from warehouse_control_center.presentation.qt.dialogs.sms_dialogs import RecordSmsDialog
 from warehouse_control_center.presentation.qt.error_mapping import (
     log_unexpected,
     translate_error,
@@ -103,12 +112,14 @@ class ShipmentsPage(QWidget):
         parent: QWidget | None = None,
         *,
         clients: ClientService | None = None,
+        shipment_sms: ShipmentSmsService | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("shipments_page")
         self._session = session
         self._shipments = shipments
         self._clients = clients
+        self._shipment_sms = shipment_sms
         self._logger = logger
         self._timezone_name = timezone_name
         self._tasks = DatabaseTaskRunner(thread_pool, self)
@@ -127,6 +138,7 @@ class ShipmentsPage(QWidget):
         self._details_dialog: ShipmentDetailsDialog | None = None
         self._confirm_dialog: ConfirmDialog | None = None
         self._control_weight_dialog: ControlWeightDialog | None = None
+        self._sms_dialog: RecordSmsDialog | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -199,6 +211,9 @@ class ShipmentsPage(QWidget):
         self.control_weight_button = self._button(
             "Control Weight", "controlShipmentWeight", self.open_control_weight
         )
+        self.record_sms_button = self._button(
+            "Record SMS", "recordShipmentSms", self.open_record_sms
+        )
         self.archive_button = self._button(
             "Archive", "archiveShipment", self.archive, secondary=True, danger=True
         )
@@ -209,11 +224,15 @@ class ShipmentsPage(QWidget):
             (self.report_problem_button, Permission.MARK_PROBLEM),
             (self.resolve_problem_button, Permission.RESOLVE_PROBLEM),
             (self.control_weight_button, Permission.CONTROL_WEIGHT_SHIPMENT),
+            (self.record_sms_button, Permission.RECORD_SHIPMENT_SMS),
             (self.archive_button, Permission.ARCHIVE_SHIPMENT),
             (self.restore_button, Permission.RESTORE_SHIPMENT),
         )
         for button, permission in visibility:
-            button.setVisible(has_permission(session, permission))
+            available = (
+                self._shipment_sms is not None or permission is not Permission.RECORD_SHIPMENT_SMS
+            )
+            button.setVisible(available and has_permission(session, permission))
         for button in self._action_buttons():
             actions.addWidget(button)
         actions.addStretch(1)
@@ -544,7 +563,12 @@ class ShipmentsPage(QWidget):
             history = self._shipments.get_status_history(self._session, shipment.id)
             problem = self._shipments.get_open_problem(self._session, shipment.id)
             weight_checks = self._shipments.get_weight_checks(self._session, shipment.id)
-            return ShipmentDetailsData(current, history, problem, weight_checks)
+            sms_events: tuple[ShipmentSmsEventDTO, ...] = ()
+            if self._shipment_sms is not None:
+                sms_events = self._shipment_sms.list_sms_for_shipment(
+                    self._session, shipment.id, page_size=100
+                ).items
+            return ShipmentDetailsData(current, history, problem, weight_checks, sms_events)
 
         self._tasks.submit(
             load,
@@ -557,6 +581,36 @@ class ShipmentsPage(QWidget):
         dialog = ShipmentDetailsDialog(cast(ShipmentDetailsData, result), self._timezone_name, self)
         self._details_dialog = dialog
         dialog.open()
+
+    def open_record_sms(self) -> None:
+        shipment = self.selected_shipment()
+        if shipment is None or self._shipment_sms is None:
+            return
+        dialog = RecordSmsDialog(shipment, self)
+        self._sms_dialog = dialog
+        dialog.record_requested.connect(lambda values: self._record_sms(dialog, shipment, values))
+        dialog.open()
+
+    def _record_sms(self, dialog: RecordSmsDialog, shipment: ShipmentDTO, values: object) -> None:
+        if self._shipment_sms is None:
+            return
+        sms_service = self._shipment_sms
+        fields = cast(dict[str, object], values)
+        dialog.set_busy(True)
+        self._mutate(
+            lambda: sms_service.record_sms(
+                self._session,
+                shipment.id,
+                sender_type=cast(SmsSenderType, fields["sender_type"]),
+                message_type=cast(SmsMessageType, fields["message_type"]),
+                phone_number=cast(str, fields["phone_number"]),
+                message_text=cast(str | None, fields["message_text"]),
+                send_status=cast(SmsSendStatus, fields["send_status"]),
+            ),
+            "record shipment SMS",
+            "SMS activity recorded successfully.",
+            dialog,
+        )
 
     def open_control_weight(self) -> None:
         shipment = self.selected_shipment()
@@ -760,6 +814,7 @@ class ShipmentsPage(QWidget):
         | ReportProblemDialog
         | ResolveProblemDialog
         | ControlWeightDialog
+        | RecordSmsDialog
         | None = None,
     ) -> None:
         if self._mutation_busy:
@@ -784,6 +839,7 @@ class ShipmentsPage(QWidget):
         | ReportProblemDialog
         | ResolveProblemDialog
         | ControlWeightDialog
+        | RecordSmsDialog
         | None,
     ) -> None:
         if dialog is not None:
@@ -801,6 +857,7 @@ class ShipmentsPage(QWidget):
         | ReportProblemDialog
         | ResolveProblemDialog
         | ControlWeightDialog
+        | RecordSmsDialog
         | None,
     ) -> None:
         presentation = translate_error(error)
@@ -853,6 +910,7 @@ class ShipmentsPage(QWidget):
             self.report_problem_button,
             self.resolve_problem_button,
             self.control_weight_button,
+            self.record_sms_button,
             self.archive_button,
             self.restore_button,
         )
@@ -883,5 +941,6 @@ class ShipmentsPage(QWidget):
         self.control_weight_button.setEnabled(
             operational and shipment.declared_weight_g is not None
         )
+        self.record_sms_button.setEnabled(operational and self._shipment_sms is not None)
         self.archive_button.setEnabled(operational)
         self.restore_button.setEnabled(not operational)

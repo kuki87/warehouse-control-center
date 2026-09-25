@@ -186,6 +186,7 @@ def test_details_show_structured_payment_and_omit_empty_section(qtbot: QtBot) ->
         "History",
         "Problem",
         "Weight history",
+        "SMS History",
     ]
     labels = {label.text() for label in dialog.findChildren(QLabel)}
     assert "123.45 BAM" in labels

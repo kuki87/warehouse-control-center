@@ -10,11 +10,18 @@ from warehouse_control_center.domain.entities import (
     Courier,
     Shipment,
     ShipmentProblem,
+    ShipmentSmsEvent,
+    ShipmentSmsSummary,
     ShipmentStatusHistory,
     ShipmentWeightCheck,
     User,
 )
-from warehouse_control_center.domain.enums import ShipmentStatus
+from warehouse_control_center.domain.enums import (
+    ShipmentStatus,
+    SmsMessageType,
+    SmsSenderType,
+    SmsSendStatus,
+)
 
 ShipmentSortField = Literal[
     "shipment_number",
@@ -41,6 +48,30 @@ class ShipmentListQuery:
     problem_only: bool = False
     sort_by: ShipmentSortField = "received_at"
     sort_direction: SortDirection = "desc"
+
+
+@dataclass(frozen=True, slots=True)
+class SmsEventListQuery:
+    shipment_id: int
+    offset: int
+    limit: int
+    sender_type: SmsSenderType | None = None
+    message_type: SmsMessageType | None = None
+    send_status: SmsSendStatus | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentSmsListQuery:
+    offset: int
+    limit: int
+    search: str | None = None
+    sender_type: SmsSenderType | None = None
+    message_type: SmsMessageType | None = None
+    send_status: SmsSendStatus | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
 
 
 class UserRepository(Protocol):
@@ -116,6 +147,18 @@ class ShipmentNumberRepository(Protocol):
     """Allocate visible shipment numbers without exposing sequence persistence."""
 
     def allocate(self) -> str: ...
+
+
+class ShipmentSmsRepository(Protocol):
+    """Append-only SMS persistence; update and delete are intentionally absent."""
+
+    def add(self, event: ShipmentSmsEvent) -> ShipmentSmsEvent: ...
+
+    def list_for_shipment(self, query: SmsEventListQuery) -> tuple[list[ShipmentSmsEvent], int]: ...
+
+    def list_shipments(
+        self, query: ShipmentSmsListQuery
+    ) -> tuple[list[ShipmentSmsSummary], int]: ...
 
 
 class AuditRepository(Protocol):

@@ -109,6 +109,7 @@ class DesktopApplication(QObject):
             self._thread_pool,
             self._logger,
             shipments=self._resources.shipments,
+            shipment_sms=getattr(self._resources, "shipment_sms", None),
             clients=self._resources.clients,
             timezone_name=self._resources.settings.timezone,
         )

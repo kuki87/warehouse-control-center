@@ -10,6 +10,7 @@ from warehouse_control_center.application.ports.repositories import (
     CourierRepository,
     ShipmentNumberRepository,
     ShipmentRepository,
+    ShipmentSmsRepository,
     UserRepository,
 )
 
@@ -29,6 +30,9 @@ class UnitOfWork(Protocol):
 
     @property
     def shipment_numbers(self) -> ShipmentNumberRepository: ...
+
+    @property
+    def shipment_sms(self) -> ShipmentSmsRepository: ...
 
     @property
     def audits(self) -> AuditRepository: ...

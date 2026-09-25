@@ -11,6 +11,7 @@ from warehouse_control_center.application.services import (
     ClientService,
     FirstRunAdministratorService,
     ShipmentService,
+    ShipmentSmsService,
 )
 from warehouse_control_center.domain.entities import User
 from warehouse_control_center.domain.enums import UserRole
@@ -40,6 +41,7 @@ class FakeClock:
 @dataclass(slots=True)
 class ShipmentHarness:
     service: ShipmentService
+    sms: ShipmentSmsService
     authentication: AuthenticationService
     clients: ClientService
     admin: SessionContext
@@ -108,6 +110,7 @@ def build_shipment_harness(session_factory: SessionFactory) -> ShipmentHarness:
     supervisor = authentication.login("supervisor", SUPERVISOR_PASSWORD)
     return ShipmentHarness(
         ShipmentService(uow_factory, clock),
+        ShipmentSmsService(uow_factory, clock),
         authentication,
         ClientService(uow_factory, clock),
         admin,

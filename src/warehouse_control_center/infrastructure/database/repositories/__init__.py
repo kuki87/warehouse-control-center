@@ -12,6 +12,9 @@ from warehouse_control_center.infrastructure.database.repositories.couriers impo
 from warehouse_control_center.infrastructure.database.repositories.shipment_numbers import (
     SqlAlchemyShipmentNumberRepository,
 )
+from warehouse_control_center.infrastructure.database.repositories.shipment_sms import (
+    SqlAlchemyShipmentSmsRepository,
+)
 from warehouse_control_center.infrastructure.database.repositories.shipments import (
     SqlAlchemyShipmentRepository,
 )
@@ -25,5 +28,6 @@ __all__ = [
     "SqlAlchemyClientRepository",
     "SqlAlchemyShipmentRepository",
     "SqlAlchemyShipmentNumberRepository",
+    "SqlAlchemyShipmentSmsRepository",
     "SqlAlchemyUserRepository",
 ]

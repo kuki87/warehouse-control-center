@@ -14,6 +14,7 @@ from warehouse_control_center.application.services import (
     ClientService,
     FirstRunAdministratorService,
     ShipmentService,
+    ShipmentSmsService,
     UserService,
 )
 from warehouse_control_center.config.settings import Settings
@@ -43,6 +44,7 @@ class ApplicationResources:
     users: UserService
     clients: ClientService
     shipments: ShipmentService
+    shipment_sms: ShipmentSmsService
     initial_administrator: TemporaryCredential | None
 
     def shutdown(self) -> None:
@@ -91,6 +93,7 @@ def bootstrap(settings: Settings | None = None) -> ApplicationResources:
             clock,
         )
         shipments = ShipmentService(uow_factory, clock)
+        shipment_sms = ShipmentSmsService(uow_factory, clock)
         clients = ClientService(uow_factory, clock)
         if initial_administrator is not None:
             logger.info("First-run administrator initialized; temporary credential not logged")
@@ -101,6 +104,7 @@ def bootstrap(settings: Settings | None = None) -> ApplicationResources:
             authentication=authentication,
             users=users,
             shipments=shipments,
+            shipment_sms=shipment_sms,
             clients=clients,
             initial_administrator=initial_administrator,
         )

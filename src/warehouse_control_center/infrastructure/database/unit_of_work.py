@@ -12,6 +12,7 @@ from warehouse_control_center.application.ports.repositories import (
     CourierRepository,
     ShipmentNumberRepository,
     ShipmentRepository,
+    ShipmentSmsRepository,
     UserRepository,
 )
 from warehouse_control_center.infrastructure.database.engine import SessionFactory
@@ -21,6 +22,7 @@ from warehouse_control_center.infrastructure.database.repositories import (
     SqlAlchemyCourierRepository,
     SqlAlchemyShipmentNumberRepository,
     SqlAlchemyShipmentRepository,
+    SqlAlchemyShipmentSmsRepository,
     SqlAlchemyUserRepository,
 )
 
@@ -36,6 +38,7 @@ class SqlAlchemyUnitOfWork:
         self._clients: ClientRepository | None = None
         self._shipments: ShipmentRepository | None = None
         self._shipment_numbers: ShipmentNumberRepository | None = None
+        self._shipment_sms: ShipmentSmsRepository | None = None
         self._audits: AuditRepository | None = None
         self.closed = True
 
@@ -76,6 +79,12 @@ class SqlAlchemyUnitOfWork:
         return self._shipment_numbers
 
     @property
+    def shipment_sms(self) -> ShipmentSmsRepository:
+        if self._shipment_sms is None:
+            raise RuntimeError("Unit of Work is not active")
+        return self._shipment_sms
+
+    @property
     def audits(self) -> AuditRepository:
         if self._audits is None:
             raise RuntimeError("Unit of Work is not active")
@@ -90,6 +99,7 @@ class SqlAlchemyUnitOfWork:
         self._clients = SqlAlchemyClientRepository(self._session)
         self._shipments = SqlAlchemyShipmentRepository(self._session)
         self._shipment_numbers = SqlAlchemyShipmentNumberRepository(self._session)
+        self._shipment_sms = SqlAlchemyShipmentSmsRepository(self._session)
         self._audits = SqlAlchemyAuditRepository(self._session)
         self.closed = False
         return self
@@ -111,6 +121,7 @@ class SqlAlchemyUnitOfWork:
             self._clients = None
             self._shipments = None
             self._shipment_numbers = None
+            self._shipment_sms = None
             self._audits = None
             self.closed = True
 

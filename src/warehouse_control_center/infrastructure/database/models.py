@@ -43,6 +43,9 @@ from warehouse_control_center.domain.enums import (
     ProblemType,
     ShipmentPayer,
     ShipmentStatus,
+    SmsMessageType,
+    SmsSenderType,
+    SmsSendStatus,
     UserRole,
     WeightCheckResult,
 )
@@ -62,6 +65,11 @@ from warehouse_control_center.domain.shipment_validation import (
     SENDER_NAME_MAX_LENGTH,
     SHIPMENT_NUMBER_MAX_LENGTH,
     STATUS_REASON_MAX_LENGTH,
+)
+from warehouse_control_center.domain.sms import (
+    SMS_ERROR_MAX_LENGTH,
+    SMS_MESSAGE_MAX_LENGTH,
+    SMS_PROVIDER_ID_MAX_LENGTH,
 )
 from warehouse_control_center.infrastructure.database.base import Base, UTCDateTime, utc_now
 
@@ -435,6 +443,102 @@ class ShipmentServiceModel(Base):
         UTCDateTime(), default=utc_now, server_default=text("CURRENT_TIMESTAMP"), nullable=False
     )
     shipment: Mapped[ShipmentModel] = relationship(back_populates="service_rows")
+
+
+class ShipmentSmsEventModel(Base):
+    __tablename__ = "shipment_sms_events"
+    __table_args__ = (
+        CheckConstraint(_allowed_values("sender_type", SmsSenderType), name="sender_type_valid"),
+        CheckConstraint(
+            "(sender_type = 'SYSTEM' AND sent_by_user_id IS NULL) OR "
+            "(sender_type IN ('WAREHOUSE', 'COURIER') AND sent_by_user_id IS NOT NULL)",
+            name="sender_user_consistent",
+        ),
+        CheckConstraint("length(trim(phone_number)) BETWEEN 3 AND 100", name="phone_length"),
+        CheckConstraint(_allowed_values("message_type", SmsMessageType), name="message_type_valid"),
+        CheckConstraint(
+            f"length(trim(message_text)) BETWEEN 1 AND {SMS_MESSAGE_MAX_LENGTH}",
+            name="message_text_length",
+        ),
+        CheckConstraint(_allowed_values("send_status", SmsSendStatus), name="send_status_valid"),
+        CheckConstraint(
+            "(send_status = 'DELIVERED' AND delivered_at IS NOT NULL "
+            "AND delivered_at >= sent_at) OR "
+            "(send_status != 'DELIVERED' AND delivered_at IS NULL)",
+            name="delivery_state_consistent",
+        ),
+        CheckConstraint(
+            f"provider_message_id IS NULL OR length(provider_message_id) <= "
+            f"{SMS_PROVIDER_ID_MAX_LENGTH}",
+            name="provider_message_id_length",
+        ),
+        CheckConstraint(
+            f"error_message IS NULL OR length(error_message) <= {SMS_ERROR_MAX_LENGTH}",
+            name="error_message_length",
+        ),
+        CheckConstraint(
+            "send_status != 'FAILED' OR "
+            "(error_message IS NOT NULL AND length(trim(error_message)) > 0)",
+            name="failed_error_required",
+        ),
+        Index("ix_shipment_sms_events_shipment_id", "shipment_id"),
+        Index("ix_shipment_sms_events_sent_at", "sent_at"),
+        Index("ix_shipment_sms_events_sender_type", "sender_type"),
+        Index("ix_shipment_sms_events_send_status", "send_status"),
+        Index("ix_shipment_sms_events_shipment_sent", "shipment_id", "sent_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(
+        ForeignKey("shipments.id", ondelete="RESTRICT"), nullable=False
+    )
+    sender_type: Mapped[SmsSenderType] = mapped_column(
+        SqlEnum(
+            SmsSenderType,
+            length=16,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    sent_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    phone_number: Mapped[str] = mapped_column(String(100), nullable=False)
+    message_type: Mapped[SmsMessageType] = mapped_column(
+        SqlEnum(
+            SmsMessageType,
+            length=32,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    send_status: Mapped[SmsSendStatus] = mapped_column(
+        SqlEnum(
+            SmsSendStatus,
+            length=16,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+    )
+    sent_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(
+        String(SMS_PROVIDER_ID_MAX_LENGTH), nullable=True
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=utc_now, server_default=text("CURRENT_TIMESTAMP"), nullable=False
+    )
 
 
 class ShipmentStatusHistoryModel(Base):

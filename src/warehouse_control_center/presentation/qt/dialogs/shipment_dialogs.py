@@ -29,6 +29,7 @@ from warehouse_control_center.application.dto import (
     ClientDTO,
     ShipmentDTO,
     ShipmentProblemDTO,
+    ShipmentSmsEventDTO,
     ShipmentStatusHistoryDTO,
     ShipmentWeightCheckDTO,
 )
@@ -42,6 +43,7 @@ from warehouse_control_center.domain.enums import (
 from warehouse_control_center.domain.exceptions import InvalidShipmentError
 from warehouse_control_center.domain.payment import bam_to_fen, fen_to_bam, validate_payment
 from warehouse_control_center.domain.shipment_workflow import can_recover, can_transition
+from warehouse_control_center.presentation.qt.dialogs.sms_dialogs import build_sms_history_table
 from warehouse_control_center.presentation.qt.shipment_formatting import (
     display_enum,
     display_timestamp,
@@ -729,6 +731,7 @@ class ShipmentDetailsData:
     history: tuple[ShipmentStatusHistoryDTO, ...]
     problem: ShipmentProblemDTO | None
     weight_checks: tuple[ShipmentWeightCheckDTO, ...] = ()
+    sms_events: tuple[ShipmentSmsEventDTO, ...] = ()
 
 
 class ShipmentDetailsDialog(QDialog):
@@ -759,6 +762,7 @@ class ShipmentDetailsDialog(QDialog):
             self._weight_history_tab(details.weight_checks, timezone_name),
             "Weight history",
         )
+        tabs.addTab(self._sms_history_tab(details.sms_events, timezone_name), "SMS History")
         layout.addWidget(tabs, 1)
         close_button = QPushButton("Close")
         close_button.setProperty("secondary", True)
@@ -937,4 +941,13 @@ class ShipmentDetailsDialog(QDialog):
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(table)
+        return tab
+
+    @staticmethod
+    def _sms_history_tab(events: tuple[ShipmentSmsEventDTO, ...], timezone_name: str) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        if not events:
+            layout.addWidget(QLabel("No SMS history."))
+        layout.addWidget(build_sms_history_table(events, timezone_name), 1)
         return tab

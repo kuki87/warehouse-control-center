@@ -20,6 +20,7 @@ class NavigationItem:
 NAVIGATION_ITEMS = (
     NavigationItem("dashboard", "Dashboard", Permission.VIEW_DASHBOARD),
     NavigationItem("shipments", "Shipments", Permission.VIEW_SHIPMENTS),
+    NavigationItem("sms_shipments", "SMS Shipments", Permission.VIEW_SHIPMENT_SMS),
     NavigationItem("clients", "Clients", Permission.VIEW_CLIENTS),
     NavigationItem("scan", "Scan", Permission.CREATE_SHIPMENT),
     NavigationItem("couriers", "Couriers", Permission.VIEW_COURIERS),
